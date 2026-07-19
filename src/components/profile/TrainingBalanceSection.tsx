@@ -28,7 +28,7 @@ export function TrainingBalanceSection({ trainingBalanceRun, onChange }: Props) 
   return (
     <SectionCard title="Training balance">
       <BalanceTrack value={value} onChange={handleChange} />
-      <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]}>
+      <Text style={[theme.type.caption, { color: theme.color.text.secondary }]}>
         Saved on this device. Cross-device sync for this setting is coming in a later phase.
       </Text>
     </SectionCard>

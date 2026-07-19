@@ -122,7 +122,7 @@ export default function OnboardingProfileSetupScreen() {
       </View>
 
       {!isOnline && usernameCheck === 'idle' && (
-        <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]}>
+        <Text style={[theme.type.caption, { color: theme.color.text.secondary }]}>
           You&apos;re offline — username availability will be confirmed once you&apos;re back online.
         </Text>
       )}

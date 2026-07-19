@@ -60,8 +60,8 @@ export function BalanceTrack({ value, onChange }: Props) {
       />
 
       <View style={styles.labelsRow}>
-        <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]}>Endurance-leaning</Text>
-        <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]}>Strength-leaning</Text>
+        <Text style={[theme.type.caption, { color: theme.color.text.secondary }]}>Endurance-leaning</Text>
+        <Text style={[theme.type.caption, { color: theme.color.text.secondary }]}>Strength-leaning</Text>
       </View>
 
       <View style={styles.snapRow}>

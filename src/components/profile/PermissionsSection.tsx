@@ -109,7 +109,7 @@ function PermissionRow({
     ? { label: 'On', fg: theme.color.feedback.success, bg: theme.color.feedback.successTint }
     : isBlocked
       ? { label: 'Off in Settings', fg: theme.color.feedback.warning, bg: theme.color.feedback.warningTint }
-      : { label: 'Off', fg: theme.color.text.tertiary, bg: theme.color.bg.inset };
+      : { label: 'Off', fg: theme.color.text.secondary, bg: theme.color.bg.inset };
 
   return (
     <View style={styles.row}>

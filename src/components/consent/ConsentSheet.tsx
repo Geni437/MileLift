@@ -66,7 +66,7 @@ export function ConsentSheet({ visible, category, loading, onAllow, onDecline }:
               <SecondaryButton label={content.declineLabel} onPress={onDecline} disabled={loading} />
             </View>
 
-            <Text style={[styles.footnote, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+            <Text style={[styles.footnote, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
               {content.footnote}
             </Text>
           </View>

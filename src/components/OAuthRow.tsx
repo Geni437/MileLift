@@ -55,7 +55,7 @@ export function OrDivider() {
   return (
     <View style={styles.dividerRow}>
       <View style={[styles.dividerLine, { backgroundColor: theme.color.border.subtle }]} />
-      <Text style={[styles.dividerLabel, { color: theme.color.text.tertiary }]}>OR</Text>
+      <Text style={[styles.dividerLabel, { color: theme.color.text.secondary }]}>OR</Text>
       <View style={[styles.dividerLine, { backgroundColor: theme.color.border.subtle }]} />
     </View>
   );

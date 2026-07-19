@@ -82,7 +82,7 @@ export function Field({ label, helperText, errorText, successText, isPassword, t
           {successText}
         </Text>
       ) : helperText ? (
-        <Text style={[styles.helper, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+        <Text style={[styles.helper, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
           {helperText}
         </Text>
       ) : null}

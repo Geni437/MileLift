@@ -181,7 +181,7 @@ function ConfirmEmailNotice({ email }: { email: string }) {
 
 function LegalLine() {
   return (
-    <Text style={[theme.type.caption, styles.legal, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+    <Text style={[theme.type.caption, styles.legal, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
       By creating an account you agree to our{' '}
       <Text style={styles.legalLink} accessibilityRole="link" onPress={() => router.push('/legal/terms')}>
         Terms
