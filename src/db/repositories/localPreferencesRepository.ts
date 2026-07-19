@@ -1,15 +1,20 @@
 import { getDb } from '../client';
 
+export type RecordingHeroMetric = 'duration' | 'distance' | 'pace';
+
 export type LocalPreferences = {
   userId: string;
   trainingBalanceRun: number; // 0-100, "run" share; "lift" share = 100 - this
   onboardingCompletedAt: string | null;
+  /** Which metric occupies the recording screen's hero slot — remembered locally per design doc CORE-01 ("The choice is remembered locally"). */
+  recordingHeroMetric: RecordingHeroMetric;
 };
 
 type Row = {
   user_id: string;
   training_balance_run: number;
   onboarding_completed_at: string | null;
+  recording_hero_metric: string;
 };
 
 /**
@@ -31,13 +36,25 @@ export const localPreferencesRepository = {
     const db = await getDb();
     const row = await db.getFirstAsync<Row>('SELECT * FROM local_preferences WHERE user_id = ?', [userId]);
     if (!row) {
-      return { userId, trainingBalanceRun: 50, onboardingCompletedAt: null };
+      return { userId, trainingBalanceRun: 50, onboardingCompletedAt: null, recordingHeroMetric: 'duration' };
     }
     return {
       userId: row.user_id,
       trainingBalanceRun: row.training_balance_run,
       onboardingCompletedAt: row.onboarding_completed_at,
+      recordingHeroMetric: (row.recording_hero_metric as RecordingHeroMetric) ?? 'duration',
     };
+  },
+
+  async setRecordingHeroMetric(userId: string, metric: RecordingHeroMetric): Promise<void> {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT INTO local_preferences (user_id, training_balance_run, onboarding_completed_at, recording_hero_metric, updated_at)
+       VALUES (?, 50, NULL, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET recording_hero_metric = excluded.recording_hero_metric, updated_at = excluded.updated_at`,
+      [userId, metric, now]
+    );
   },
 
   async setTrainingBalance(userId: string, trainingBalanceRun: number): Promise<void> {

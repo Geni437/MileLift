@@ -1,9 +1,9 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Screen } from '../../src/components/Screen';
-import { EmptyState } from '../../src/components/EmptyState';
-import { MeridianMark } from '../../src/components/MeridianMark';
+import { Screen } from '../../../src/components/Screen';
+import { EmptyState } from '../../../src/components/EmptyState';
+import { MeridianMark } from '../../../src/components/MeridianMark';
 
 /**
  * Placeholder Home tab. Phase 0 scope is explicitly auth/onboarding/consent/

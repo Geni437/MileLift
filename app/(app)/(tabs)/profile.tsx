@@ -1,24 +1,25 @@
 import React from 'react';
 import { StyleSheet, Text } from 'react-native';
 
-import { theme } from '../../src/theme';
-import { Screen } from '../../src/components/Screen';
-import { SkeletonBlock } from '../../src/components/SkeletonBlock';
-import { InlineBanner } from '../../src/components/InlineBanner';
-import { EmptyState } from '../../src/components/EmptyState';
-import { IdentitySection } from '../../src/components/profile/IdentitySection';
-import { TrainingBalanceSection } from '../../src/components/profile/TrainingBalanceSection';
-import { UnitsSection } from '../../src/components/profile/UnitsSection';
-import { HealthDetailsSection } from '../../src/components/profile/HealthDetailsSection';
-import { PermissionsSection } from '../../src/components/profile/PermissionsSection';
-import { AccountSection } from '../../src/components/profile/AccountSection';
-import { useAuth } from '../../src/state/AuthContext';
-import { useProfile } from '../../src/state/ProfileContext';
-import { useConsent } from '../../src/state/ConsentContext';
-import { runSync } from '../../src/sync/syncEngine';
+import { theme } from '../../../src/theme';
+import { Screen } from '../../../src/components/Screen';
+import { SkeletonBlock } from '../../../src/components/SkeletonBlock';
+import { InlineBanner } from '../../../src/components/InlineBanner';
+import { EmptyState } from '../../../src/components/EmptyState';
+import { IdentitySection } from '../../../src/components/profile/IdentitySection';
+import { TrainingBalanceSection } from '../../../src/components/profile/TrainingBalanceSection';
+import { UnitsSection } from '../../../src/components/profile/UnitsSection';
+import { HealthDetailsSection } from '../../../src/components/profile/HealthDetailsSection';
+import { PermissionsSection } from '../../../src/components/profile/PermissionsSection';
+import { HealthConnectSection } from '../../../src/components/profile/HealthConnectSection';
+import { AccountSection } from '../../../src/components/profile/AccountSection';
+import { useAuth } from '../../../src/state/AuthContext';
+import { useProfile } from '../../../src/state/ProfileContext';
+import { useConsent } from '../../../src/state/ConsentContext';
+import { runSync } from '../../../src/sync/syncEngine';
 
 export default function ProfileScreen() {
-  const { session, signOut } = useAuth();
+  const { session, signOut, userId } = useAuth();
   const { loadState, loadError, profile, profileHealth, preferences, updateProfile, updateProfileHealth, setTrainingBalance, refresh } =
     useProfile();
   const { categories, grant } = useConsent();
@@ -76,6 +77,15 @@ export default function ProfileScreen() {
       />
 
       <PermissionsSection />
+
+      <HealthConnectSection
+        userId={userId}
+        unitDistance={profile.unitDistance}
+        onRequestHealthConsent={async () => {
+          const result = await grant('health');
+          return { ok: result.ok };
+        }}
+      />
 
       <AccountSection
         email={email}

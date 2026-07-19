@@ -1,42 +1,20 @@
-import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
+import { Stack } from 'expo-router';
 
 import { theme } from '../../src/theme';
 
 /**
- * App shell tab bar. Phase 0 scope is just Home (placeholder — Activity/
- * Nutrition/Strength are Phase 1-3) and Profile. No icon set is defined in
- * docs/design/ yet, so tabs use text labels only rather than mobile-builder
- * inventing icon glyphs outside the design system.
+ * App-shell stack. Wraps the tab group so `record` (CORE-01) and
+ * `activity/[id]` (CORE-02) can live OUTSIDE the tab bar per
+ * docs/design/screens-phase-1.md §B: recording is "a full-screen modal
+ * route ... not a tab — it's a single immersive task" that "blocks the tab
+ * bar while active," and activity detail is "a pushed route."
  */
-export default function AppLayout() {
+export default function AppShellLayout() {
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: theme.color.accent.primary,
-        tabBarInactiveTintColor: theme.color.text.tertiary,
-        tabBarStyle: {
-          backgroundColor: theme.color.bg.surface,
-          borderTopColor: theme.color.border.subtle,
-        },
-        tabBarLabelStyle: { ...theme.type.label },
-      }}
-    >
-      <Tabs.Screen
-        name="home"
-        options={{
-          title: 'Home',
-          tabBarLabel: ({ color }) => <Text style={{ color, ...theme.type.label }}>Home</Text>,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarLabel: ({ color }) => <Text style={{ color, ...theme.type.label }}>Profile</Text>,
-        }}
-      />
-    </Tabs>
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.color.bg.canvas } }}>
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="record" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="activity/[id]" />
+    </Stack>
   );
 }

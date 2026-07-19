@@ -26,21 +26,22 @@ first), because later migrations reference objects created by earlier ones
 Order to roll back, if rolling back everything (the save/PR-detection RPC
 layer first, since it's built on top of the Phase 1 Module A tables; those
 tables first, since they're layered on top of the Phase 0 spine):
-1. `20260719140000_create_activity_save_and_pr_rpcs.sql`
-2. `20260719133900_create_activity_tracks_storage_bucket.sql`
-3. `20260719133800_create_kudos.sql`
-4. `20260719133700_create_activity_achievements.sql`
-5. `20260719133600_create_personal_records.sql`
-6. `20260719133500_create_biometric_samples.sql`
-7. `20260719133400_create_wearable_links.sql`
-8. `20260719133300_create_activity_routes.sql`
-9. `20260719133200_create_activity_details.sql`
-10. `20260719133100_create_activity_types.sql`
-11. `20260719133000_enable_postgis.sql`
-12. `20260718210848_create_timeline_events.sql`
-13. `20260718210837_create_profile_health.sql`
-14. `20260718210826_create_user_consents.sql`
-15. `20260718210814_create_profiles.sql`
+1. `20260719150000_add_activity_routes_simplified_path_geojson.sql`
+2. `20260719140000_create_activity_save_and_pr_rpcs.sql`
+3. `20260719133900_create_activity_tracks_storage_bucket.sql`
+4. `20260719133800_create_kudos.sql`
+5. `20260719133700_create_activity_achievements.sql`
+6. `20260719133600_create_personal_records.sql`
+7. `20260719133500_create_biometric_samples.sql`
+8. `20260719133400_create_wearable_links.sql`
+9. `20260719133300_create_activity_routes.sql`
+10. `20260719133200_create_activity_details.sql`
+11. `20260719133100_create_activity_types.sql`
+12. `20260719133000_enable_postgis.sql`
+13. `20260718210848_create_timeline_events.sql`
+14. `20260718210837_create_profile_health.sql`
+15. `20260718210826_create_user_consents.sql`
+16. `20260718210814_create_profiles.sql`
 
 (The grant/privilege-lockdown correction migrations from 2026-07-19
 [`20260719110557`..`20260719131119`] are additive ACL fixes with no table of

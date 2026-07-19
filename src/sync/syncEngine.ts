@@ -5,6 +5,14 @@ import { supabase } from '../lib/supabase';
 import { profileRepository } from '../db/repositories/profileRepository';
 import { profileHealthRepository } from '../db/repositories/profileHealthRepository';
 import { consentRepository } from '../db/repositories/consentRepository';
+import {
+  pullActivities,
+  pullActivityAchievements,
+  pullPersonalRecords,
+  pushActivities,
+  refreshActivityTypesIfNeeded,
+} from './activitySync';
+import { wearableLinksRepository } from '../db/repositories/wearableLinksRepository';
 import type { ProfileRow } from '../db/repositories/profileRepository';
 import type { ProfileHealthRow } from '../db/repositories/profileHealthRepository';
 import type { ConsentRow } from '../db/repositories/consentRepository';
@@ -67,8 +75,41 @@ export async function runSync(_reason: 'startup' | 'foreground' | 'reconnect' | 
     await pushConsents();
     await pullProfile(currentUserId);
     await pullConsents(currentUserId);
+
+    // Phase 1 — Module A. Activity types is cheap/rarely-changing reference
+    // data, refreshed once (cached thereafter). Push before pull so this
+    // device's own writes are reflected before pulling anyone else's.
+    await refreshActivityTypesIfNeeded();
+    await pushActivities(currentUserId);
+    await pushWearableLinks();
+    await pullActivities(currentUserId);
+    await pullPersonalRecords(currentUserId);
+    await pullActivityAchievements(currentUserId);
   } finally {
     syncing = false;
+  }
+}
+
+async function pushWearableLinks(): Promise<void> {
+  const pending = await wearableLinksRepository.getUnsynced();
+  for (const link of pending) {
+    const { error } = await supabase.from('wearable_links').upsert(
+      {
+        id: link.id,
+        timeline_event_id: link.timelineEventId,
+        user_id: link.userId,
+        provider: link.provider,
+        direction: link.direction,
+        external_record_id: link.externalRecordId,
+        synced_at: link.syncedAt,
+      },
+      { onConflict: 'id' }
+    );
+    if (error) {
+      await wearableLinksRepository.markFailed(link.id, error.message);
+    } else {
+      await wearableLinksRepository.markSynced(link.id);
+    }
   }
 }
 

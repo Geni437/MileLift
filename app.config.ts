@@ -27,6 +27,18 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   );
 }
 
+// Phase 1 — Module A (CORE-02 RouteMap). Unlike the Supabase values above,
+// this is NOT safe to commit a real value for (Google Maps Android API keys
+// are typically restricted by package name + SHA-1 fingerprint, but treating
+// it as a real secret is the safer default) — deliberately optional and NOT
+// fail-loud: an unset key means the map tiles won't render on a real device
+// build (the RouteMap component still renders its local-geometry fallback,
+// design doc CORE-02's "Map tiles unavailable offline" treatment covers the
+// same visual gap), not a hard crash. Set it in `.env`/CI secrets before a
+// real device/store build — flagged as a real deploy-time prerequisite, not
+// silently assumed done.
+const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'MileLift',
@@ -70,7 +82,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       monochromeImage: './assets/android-icon-monochrome.png',
       backgroundColor: '#0B0F16',
     },
+    // No ACCESS_BACKGROUND_LOCATION — recording is deliberately foreground-
+    // only (mobile-architecture-standards, and matching the existing E2
+    // consent copy's promise: "never in the background between
+    // activities"). Adding true background/screen-off recording later needs
+    // a new consent purpose string and Google Play's background-location
+    // prominent-disclosure review process — flagged, not silently assumed.
     permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION', 'CAMERA'],
+    config: GOOGLE_MAPS_API_KEY ? { googleMaps: { apiKey: GOOGLE_MAPS_API_KEY } } : undefined,
   },
   web: {
     favicon: './assets/favicon.png',
@@ -110,6 +129,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         photosPermission: 'Choose a photo from your library to use as a progress photo.',
       },
     ],
+    // CORE-03 (Android-only Health Connect). This plugin only wires the
+    // required AndroidManifest intent-filter (permissions-rationale
+    // activity) — no config options.
+    'react-native-health-connect',
+    // CORE-02 RouteMap. Reads the Android API key from
+    // `android.config.googleMaps.apiKey` above.
+    'react-native-maps',
   ],
   experiments: {
     typedRoutes: true,
