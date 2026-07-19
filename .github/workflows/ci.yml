@@ -1,0 +1,134 @@
+name: CI
+
+# Phase 0 CI skeleton (see docs/ops/ci-cd.md for the full writeup of what this
+# does and does not cover). Runs on every push to a main branch and on every
+# pull request, per production-standards: catch a problem at PR time, not at
+# deploy time.
+#
+# Triggered on both `main` and `master` push because this repo's default
+# branch naming hasn't been finalized yet (tracked in docs/ops/ci-cd.md) —
+# narrow this to the single actual default branch once that's settled.
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+# Cancel a superseded run on the same branch/PR instead of letting redundant
+# runs pile up and burn CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege default: this workflow only ever reads the repo and reports
+# check results — it does not need write access to contents, packages, or
+# deployments.
+permissions:
+  contents: read
+
+env:
+  # Pinned to the exact Node version this pipeline was verified against
+  # locally (see docs/ops/ci-cd.md). Bump deliberately, alongside local dev
+  # tooling, not silently.
+  NODE_VERSION: '24'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint, type-check, and unit/integration test the Expo app. These three
+  # underlying commands (npm run lint / npm run typecheck / npm test) were
+  # verified to pass locally before this workflow was written — see the task
+  # report for actual output.
+  # ---------------------------------------------------------------------------
+  app-checks:
+    name: Lint, typecheck, and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (reproducible, lockfile-exact)
+        run: npm ci
+
+      - name: Lint (eslint, zero warnings allowed)
+        run: npm run lint
+
+      - name: Type-check (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Unit / integration tests (jest)
+        run: npm test -- --ci
+        env:
+          # Forward-looking convention, not required by today's test suite:
+          # no current test imports app.config.ts / src/lib/env.ts, so this is
+          # a no-op today. Wired now so a future test that does exercise the
+          # Supabase-config path doesn't require retrofitting CI. See
+          # docs/ops/ci-cd.md#environment--secrets for the full convention,
+          # including the current single-Supabase-project gap.
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+
+  # ---------------------------------------------------------------------------
+  # Dependency vulnerability scan. Split into a blocking gate (high/critical)
+  # and a non-blocking, explicitly-visible report (moderate+) — see
+  # docs/ops/ci-cd.md#dependency-audit for why moderate isn't blocking yet
+  # (a pre-existing, tracked, non-silent gap: transitive Expo/RN build-tooling
+  # deps, not runtime app code shipped to users).
+  # ---------------------------------------------------------------------------
+  dependency-audit:
+    name: Dependency vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (reproducible, lockfile-exact)
+        run: npm ci
+
+      - name: Audit — blocking on high/critical severity
+        run: npm audit --audit-level=high
+
+      - name: Audit — report moderate+ severity (non-blocking, always visible)
+        if: always()
+        run: |
+          npm audit --audit-level=moderate || \
+            echo "::warning::npm audit found moderate-severity issue(s). Non-blocking for now — see docs/ops/ci-cd.md#dependency-audit for the tracked reason and follow-up. This warning must not be ignored indefinitely."
+
+  # ---------------------------------------------------------------------------
+  # Supabase migration lint / dry-run. See scripts/lint-migrations.mjs for the
+  # exact, honestly-scoped list of what this does and does not verify — real
+  # PostgreSQL-grammar syntax + this repo's filename/rollback conventions, NOT
+  # a full apply against a live Postgres/Supabase instance (that needs the
+  # Supabase CLI's Docker-based local stack, unavailable in this environment;
+  # tracked as a follow-up in docs/ops/ci-cd.md).
+  # ---------------------------------------------------------------------------
+  migration-lint:
+    name: Supabase migration lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (reproducible, lockfile-exact)
+        run: npm ci
+
+      - name: Lint migrations (syntax + filename/rollback convention)
+        run: npm run lint:migrations

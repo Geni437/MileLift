@@ -1,0 +1,23 @@
+-- Rollback for 20260719112010_secure_default_grants_and_profiles_public.sql
+--
+-- DELIBERATE NO-OP. This migration closed a confirmed, live cross-user write
+-- vulnerability (any authenticated user could overwrite another user's
+-- profiles row via profiles_public). Reverting it would restore that
+-- vulnerability. There is no scenario where rolling this back is the right
+-- move; per db-schema-standards, an explicit, justified "this is intentionally
+-- a one-way migration" note is the correct alternative to a working reversal
+-- when the reversal itself would be unsafe.
+--
+-- If a future engineer genuinely needs to widen one of these grants again
+-- (e.g. a deliberate, reviewed product decision to make profiles_public
+-- writable for some new feature), that should be a new, forward migration
+-- with its own explicit reasoning and RLS-equivalent protection — not a
+-- reversion of this one. For reference only, what this migration revoked was:
+--   - ALL on profiles_public from anon, authenticated (re-granted SELECT to
+--     authenticated only)
+--   - ALL on profiles/user_consents/profile_health/timeline_events from anon
+--   - UPDATE, DELETE on profiles/user_consents/timeline_events from
+--     authenticated (profile_health kept its DELETE grant)
+--   - UPDATE on profile_health from authenticated
+
+select 1; -- no-op placeholder so this file is valid, runnable SQL

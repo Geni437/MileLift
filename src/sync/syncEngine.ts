@@ -1,0 +1,175 @@
+import { AppState, type AppStateStatus } from 'react-native';
+import * as Network from 'expo-network';
+
+import { supabase } from '../lib/supabase';
+import { profileRepository } from '../db/repositories/profileRepository';
+import { profileHealthRepository } from '../db/repositories/profileHealthRepository';
+import { consentRepository } from '../db/repositories/consentRepository';
+import type { ProfileRow } from '../db/repositories/profileRepository';
+import type { ProfileHealthRow } from '../db/repositories/profileHealthRepository';
+import type { ConsentRow } from '../db/repositories/consentRepository';
+
+/**
+ * The Phase-0-scoped sync engine: profile / profile_health / user_consents
+ * only (task brief: "scoped here to just the profile/auth data, not the full
+ * timeline sync engine"). Push path uses upsert-by-primary-key so a retried
+ * flush after a flaky network is always safe (architecture §3.4 idempotency)
+ * — profiles/profile_health are keyed by the owner's uuid already; consents
+ * carry a client-generated uuid `id`.
+ *
+ * Triggers (mobile-architecture-standards: "sync opportunistically," not a
+ * persistent-connection assumption):
+ *   - once at app start / sign-in,
+ *   - on AppState -> 'active' (foreground),
+ *   - on a network-state transition into "connected",
+ *   - immediately after each local optimistic write (best-effort; failures
+ *     stay `pending`/`failed` and are retried by the above).
+ */
+let listenersAttached = false;
+let currentUserId: string | null = null;
+let syncing = false;
+
+export function setSyncUser(userId: string | null): void {
+  currentUserId = userId;
+}
+
+export function attachSyncTriggers(): () => void {
+  if (listenersAttached) return () => {};
+  listenersAttached = true;
+
+  const appStateSub = AppState.addEventListener('change', (state: AppStateStatus) => {
+    if (state === 'active') void runSync('foreground');
+  });
+
+  const networkSub = Network.addNetworkStateListener((event) => {
+    if (event.isConnected && event.isInternetReachable !== false) {
+      void runSync('reconnect');
+    }
+  });
+
+  return () => {
+    appStateSub.remove();
+    networkSub.remove();
+    listenersAttached = false;
+  };
+}
+
+export async function runSync(_reason: 'startup' | 'foreground' | 'reconnect' | 'manual' | 'post-write'): Promise<void> {
+  if (!currentUserId || syncing) return;
+
+  const net = await Network.getNetworkStateAsync();
+  if (!net.isConnected || net.isInternetReachable === false) return;
+
+  syncing = true;
+  try {
+    await pushProfile(currentUserId);
+    await pushProfileHealth(currentUserId);
+    await pushConsents();
+    await pullProfile(currentUserId);
+    await pullConsents(currentUserId);
+  } finally {
+    syncing = false;
+  }
+}
+
+async function pushProfile(userId: string): Promise<void> {
+  const pending = await profileRepository.getUnsynced();
+  const mine = pending.find((p) => p.id === userId);
+  if (!mine) return;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .upsert(
+      {
+        id: mine.id,
+        username: mine.username,
+        display_name: mine.displayName,
+        avatar_url: mine.avatarUrl,
+        unit_weight: mine.unitWeight,
+        unit_distance: mine.unitDistance,
+        default_timezone: mine.defaultTimezone,
+        deletion_requested_at: mine.deletionRequestedAt,
+      },
+      { onConflict: 'id' }
+    )
+    .select()
+    .single<ProfileRow>();
+
+  if (error) {
+    await profileRepository.markFailed(userId, error.message);
+    return;
+  }
+  if (data) {
+    await profileRepository.reconcileFromServerForce(data);
+  }
+}
+
+async function pushProfileHealth(userId: string): Promise<void> {
+  const pending = await profileHealthRepository.getUnsynced();
+  const mine = pending.find((p) => p.userId === userId);
+  if (!mine) return;
+
+  const { data, error } = await supabase
+    .from('profile_health')
+    .upsert(
+      {
+        user_id: mine.userId,
+        sex: mine.sex,
+        date_of_birth: mine.dateOfBirth,
+        height_cm: mine.heightCm,
+      },
+      { onConflict: 'user_id' }
+    )
+    .select()
+    .single<ProfileHealthRow>();
+
+  if (error) {
+    // The DB-level consent trigger (enforce_health_consent) rejects this
+    // with a specific Postgres error if the health consent row hasn't
+    // synced yet (e.g. grant + edit happened back-to-back offline and the
+    // consent push hasn't landed). Surface that distinctly rather than a
+    // generic failure, so the UI/ops log can tell "no connection" apart
+    // from "consent not yet recognized server-side."
+    const message = error.code === '42501' ? 'Waiting for health consent to sync first.' : error.message;
+    await profileHealthRepository.markFailed(userId, message);
+    return;
+  }
+  if (data) {
+    await profileHealthRepository.markSynced(data);
+  }
+}
+
+async function pushConsents(): Promise<void> {
+  const pending = await consentRepository.getUnsynced();
+  for (const consent of pending) {
+    const { error } = await supabase.from('user_consents').upsert(
+      {
+        id: consent.id,
+        user_id: consent.userId,
+        category: consent.category,
+        purpose_version: consent.purposeVersion,
+        granted_at: consent.grantedAt,
+        revoked_at: consent.revokedAt,
+      },
+      { onConflict: 'id' }
+    );
+
+    if (error) {
+      await consentRepository.markFailed(consent.id, error.message);
+    } else {
+      await consentRepository.markSynced(consent.id);
+    }
+  }
+}
+
+async function pullProfile(userId: string): Promise<void> {
+  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle<ProfileRow>();
+  if (error || !data) return;
+  await profileRepository.reconcileFromServer(data);
+}
+
+async function pullConsents(userId: string): Promise<void> {
+  const { data, error } = await supabase.from('user_consents').select('*').eq('user_id', userId);
+  if (error || !data) return;
+  await consentRepository.reconcileFromServer(data as ConsentRow[]);
+}

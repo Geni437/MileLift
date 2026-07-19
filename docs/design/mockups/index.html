@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MileLift — Phase 0 Design Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  /* ---- Tokens mirrored from theme.ts (dark theme) ---- */
+  :root {
+    --graphite-950:#0B0F16; --graphite-900:#0F141D; --graphite-850:#131A24;
+    --graphite-800:#19212D; --graphite-750:#212B39; --graphite-700:#2B3646;
+    --graphite-600:#3A4657; --graphite-500:#4E5B6E; --graphite-400:#697687;
+    --graphite-300:#8B97A7; --graphite-200:#B2BBC8; --graphite-100:#D7DCE4;
+    --graphite-50:#EEF1F6;
+    --ember-500:#F5871F; --ember-600:#DA700F; --ember-400:#FF9F45; --ember-tint:rgba(245,135,31,.12);
+    --cyan-500:#38A9C9; --cyan-400:#5DC1DC; --cyan-tint:rgba(56,169,201,.14);
+    --plasma-500:#7C5CFF; --plasma-tint:rgba(124,92,255,.16);
+    --growth-500:#2FC978; --growth-tint:rgba(47,201,120,.14);
+    --danger-500:#EF4E3A; --danger-tint:rgba(239,78,58,.14);
+    --gold-500:#F5B830; --gold-tint:rgba(245,184,48,.14);
+
+    --bg-canvas:var(--graphite-950); --bg-surface:var(--graphite-900);
+    --bg-raised:var(--graphite-850); --bg-inset:var(--graphite-800);
+    --border-subtle:var(--graphite-750); --border-default:var(--graphite-700);
+    --text-primary:var(--graphite-50); --text-secondary:var(--graphite-300);
+    --text-tertiary:var(--graphite-400); --text-on-accent:var(--graphite-950);
+
+    --sp-xs:8px; --sp-sm:12px; --sp-md:16px; --sp-lg:20px; --sp-xl:24px; --sp-xxl:32px;
+    --r-sm:6px; --r-md:10px; --r-lg:14px; --r-xl:20px; --r-pill:999px;
+
+    --f-display:'Archivo',sans-serif; --f-body:'Inter',sans-serif; --f-metric:'JetBrains Mono',monospace;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:#05070b; color:var(--text-primary);
+    font-family:var(--f-body); -webkit-font-smoothing:antialiased;
+    padding:40px 24px 80px;
+  }
+  .display { font-family:var(--f-display); font-stretch:expanded; font-variation-settings:'wdth' 125; }
+  .metric { font-family:var(--f-metric); font-variant-numeric:tabular-nums; }
+
+  .page-head { max-width:1200px; margin:0 auto 40px; }
+  .page-head h1 { font-family:var(--f-display); font-stretch:expanded; font-size:28px; letter-spacing:-.5px; }
+  .page-head p { color:var(--text-secondary); margin-top:8px; max-width:640px; line-height:1.5; }
+
+  .swatches { display:flex; flex-wrap:wrap; gap:12px; margin-top:20px; }
+  .swatch { border-radius:var(--r-md); overflow:hidden; width:150px; background:var(--bg-raised); border:1px solid var(--border-subtle); }
+  .swatch .chip { height:52px; }
+  .swatch .meta { padding:8px 10px; }
+  .swatch .role { font-size:11px; color:var(--text-primary); font-weight:600; }
+  .swatch .hex { font-family:var(--f-metric); font-size:11px; color:var(--text-tertiary); margin-top:2px; }
+
+  .frames { display:flex; flex-wrap:wrap; gap:28px; justify-content:center; max-width:1200px; margin:48px auto 0; }
+  .phone {
+    width:320px; min-height:660px; background:var(--bg-canvas);
+    border-radius:34px; border:1px solid var(--border-default);
+    padding:22px var(--sp-md) var(--sp-lg); position:relative; overflow:hidden;
+    box-shadow:0 30px 70px rgba(0,0,0,.55);
+  }
+  .phone .label { position:absolute; top:-26px; left:6px; font-size:12px; color:var(--text-tertiary); font-weight:600; letter-spacing:.4px; }
+
+  /* ---- Meridian signature mark ---- */
+  .meridian { position:relative; display:inline-block; }
+  .meridian svg { display:block; }
+
+  h2.screen-title { font-family:var(--f-display); font-stretch:expanded; letter-spacing:-.25px; }
+
+  .headline { font-size:24px; line-height:1.15; letter-spacing:-.25px; }
+  .sub { color:var(--text-secondary); font-size:15px; line-height:1.5; margin-top:10px; }
+  .em { color:var(--ember-500); }
+
+  .btn { display:flex; align-items:center; justify-content:center; height:52px; border-radius:var(--r-md);
+         font-family:var(--f-body); font-weight:600; font-size:15px; border:none; cursor:pointer; width:100%; }
+  .btn-primary { background:var(--ember-500); color:var(--text-on-accent); }
+  .btn-secondary { background:transparent; color:var(--text-primary); border:1px solid var(--border-default); }
+  .btn + .btn { margin-top:12px; }
+
+  .divider { display:flex; align-items:center; gap:12px; color:var(--text-tertiary);
+             font-size:11px; letter-spacing:1.2px; font-weight:600; margin:18px 0; }
+  .divider::before, .divider::after { content:''; height:1px; flex:1; background:var(--border-subtle); }
+
+  .field { margin-bottom:14px; }
+  .field label { display:block; font-size:13px; color:var(--text-secondary); font-weight:500; margin-bottom:6px; letter-spacing:.2px; }
+  .field .input { height:48px; background:var(--bg-inset); border:1px solid var(--border-default);
+                  border-radius:var(--r-sm); display:flex; align-items:center; padding:0 12px; color:var(--text-primary); font-size:15px; }
+  .field .input.placeholder { color:var(--text-tertiary); }
+  .field .input.focus { border-color:var(--cyan-400); border-width:2px; }
+  .helper { font-size:12px; color:var(--text-tertiary); margin-top:6px; }
+  .helper.err { color:var(--danger-500); }
+
+  .foot-link { text-align:center; color:var(--text-secondary); font-size:13px; margin-top:18px; }
+  .foot-link b { color:var(--ember-500); }
+
+  /* progress meridian (onboarding) */
+  .prog { margin-bottom:22px; }
+
+  /* balance track */
+  .track { position:relative; height:8px; border-radius:var(--r-pill);
+           background:linear-gradient(90deg, var(--ember-500), var(--graphite-600) 50%, var(--cyan-500)); margin:26px 0 14px; }
+  .knob { position:absolute; top:50%; left:70%; width:22px; height:22px; border-radius:50%;
+          background:var(--graphite-50); transform:translate(-50%,-50%); box-shadow:0 2px 8px rgba(0,0,0,.5);
+          border:2px solid var(--graphite-800); }
+  .ratio { display:flex; align-items:baseline; gap:8px; justify-content:center; margin-top:8px; }
+  .ratio .val { font-family:var(--f-metric); font-variant-numeric:tabular-nums; font-size:20px; color:var(--text-primary); }
+  .ratio .lab { font-size:13px; color:var(--text-secondary); letter-spacing:.2px; }
+  .poles { display:flex; justify-content:space-between; font-size:12px; color:var(--text-tertiary); margin-top:2px; }
+
+  /* consent sheet */
+  .sheet { background:var(--bg-raised); border:1px solid var(--border-subtle); border-radius:var(--r-xl);
+           padding:var(--sp-xl) var(--sp-lg); margin-top:auto; }
+  .sheet .ic { width:44px; height:44px; border-radius:12px; display:flex; align-items:center; justify-content:center; margin-bottom:14px; }
+  .sheet h3 { font-family:var(--f-display); font-stretch:expanded; font-size:19px; margin-bottom:10px; }
+  .sheet p { font-size:15px; color:var(--text-primary); line-height:1.5; }
+  .wontdo { display:flex; gap:10px; margin:14px 0 20px; color:var(--text-secondary); font-size:14px; line-height:1.45; }
+  .wontdo .dot { color:var(--cyan-400); flex:none; }
+  .sheet .note { font-size:12px; color:var(--text-tertiary); margin-top:14px; text-align:center; }
+
+  /* profile */
+  .p-section { margin-bottom:20px; }
+  .p-head { display:flex; align-items:center; gap:8px; font-size:11px; letter-spacing:1.2px; text-transform:uppercase;
+            color:var(--text-tertiary); font-weight:600; margin-bottom:10px; }
+  .p-card { background:var(--bg-raised); border:1px solid var(--border-subtle); border-radius:var(--r-lg); padding:14px 16px; }
+  .p-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; }
+  .p-row + .p-row { border-top:1px solid var(--border-subtle); }
+  .p-row .k { font-size:14px; color:var(--text-secondary); }
+  .p-row .v { font-family:var(--f-metric); font-variant-numeric:tabular-nums; font-size:15px; color:var(--text-primary); }
+  .chip-on { background:var(--growth-tint); color:var(--growth-500); font-size:12px; font-weight:600; padding:4px 10px; border-radius:var(--r-pill); }
+  .chip-off { background:var(--bg-inset); color:var(--text-tertiary); font-size:12px; font-weight:600; padding:4px 10px; border-radius:var(--r-pill); }
+  .avatar { width:56px; height:56px; border-radius:50%; background:linear-gradient(135deg,var(--ember-600),var(--plasma-500)); }
+  .idrow { display:flex; align-items:center; gap:14px; }
+  .idrow .nm { font-family:var(--f-display); font-stretch:expanded; font-size:18px; }
+  .idrow .hn { color:var(--text-secondary); font-size:13px; margin-top:2px; }
+  .seg { display:inline-flex; background:var(--bg-inset); border-radius:var(--r-pill); padding:3px; }
+  .seg span { font-size:13px; padding:5px 12px; border-radius:var(--r-pill); color:var(--text-tertiary); font-family:var(--f-metric); }
+  .seg span.on { background:var(--ember-500); color:var(--text-on-accent); }
+
+  .col-gap { display:flex; flex-direction:column; height:100%; }
+  .spacer { flex:1; }
+  .brandrow { display:flex; align-items:center; gap:10px; margin-bottom:26px; }
+  .brandrow .wm { font-family:var(--f-display); font-stretch:expanded; font-size:17px; letter-spacing:-.2px; }
+  .wm .lift { color:var(--ember-500); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1 class="display">MileLift — Phase 0</h1>
+  <p>Static mockup proving design intent before RN implementation. Dark theme. The
+  signature "Meridian" mark (warm horizontal Mile axis + cool vertical Lift axis
+  meeting at an origin) recurs as logo, onboarding progress, and section anchor.
+  Fonts approximate the RN stack: Archivo (Expanded) display, Inter body, JetBrains Mono metrics.</p>
+
+  <div class="swatches">
+    <div class="swatch"><div class="chip" style="background:var(--graphite-850)"></div><div class="meta"><div class="role">Foundation · Iron</div><div class="hex">graphite-850</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--ember-500)"></div><div class="meta"><div class="role">Activity / CTA · Mile</div><div class="hex">#F5871F</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--cyan-500)"></div><div class="meta"><div class="role">Trust / Data</div><div class="hex">#38A9C9</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--plasma-500)"></div><div class="meta"><div class="role">AI / Intensity</div><div class="hex">#7C5CFF</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--growth-500)"></div><div class="meta"><div class="role">Coaching / Growth</div><div class="hex">#2FC978</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--danger-500)"></div><div class="meta"><div class="role">Danger (functional)</div><div class="hex">#EF4E3A</div></div></div>
+  </div>
+</div>
+
+<div class="frames">
+
+  <!-- 1. SIGN UP -->
+  <div class="phone">
+    <span class="label">Sign-up</span>
+    <div class="col-gap">
+      <div class="brandrow">
+        <span class="meridian">
+          <svg width="26" height="26" viewBox="0 0 26 26">
+            <line x1="4" y1="20" x2="24" y2="20" stroke="#F5871F" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="4" y1="20" x2="4" y2="4" stroke="#38A9C9" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="4" cy="20" r="3" fill="#EEF1F6"/>
+          </svg>
+        </span>
+        <span class="wm">Mile<span class="lift">Lift</span></span>
+      </div>
+
+      <h2 class="headline display">One log. The miles and the lifts.</h2>
+      <p class="sub">Everything you track, in one history — not five apps that never talk.</p>
+
+      <div style="margin-top:22px">
+        <button class="btn btn-secondary"> Continue with Apple</button>
+        <button class="btn btn-secondary">G&nbsp; Continue with Google</button>
+      </div>
+      <div class="divider">OR</div>
+
+      <div class="field">
+        <label>Email</label>
+        <div class="input placeholder">you@email.com</div>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <div class="input focus">••••••••</div>
+        <div class="helper">At least 8 characters</div>
+      </div>
+      <button class="btn btn-primary">Create account</button>
+      <p class="helper" style="text-align:center;margin-top:14px">By creating an account you agree to our Terms and Privacy Policy.</p>
+
+      <div class="spacer"></div>
+      <p class="foot-link">Already have an account? <b>Log in</b></p>
+    </div>
+  </div>
+
+  <!-- 2. ONBOARDING - balance -->
+  <div class="phone">
+    <span class="label">Onboarding · Step 2 (balance)</span>
+    <div class="col-gap">
+      <!-- progress meridian: mile axis ~2/3 drawn, lift not yet -->
+      <div class="prog meridian">
+        <svg width="120" height="34" viewBox="0 0 120 34">
+          <line x1="6" y1="26" x2="80" y2="26" stroke="#F5871F" stroke-width="3" stroke-linecap="round"/>
+          <line x1="80" y1="26" x2="114" y2="26" stroke="#212B39" stroke-width="3" stroke-linecap="round"/>
+          <line x1="6" y1="26" x2="6" y2="14" stroke="#212B39" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="6" cy="26" r="4" fill="#EEF1F6"/>
+        </svg>
+      </div>
+
+      <h2 class="screen-title" style="font-size:22px">Where's your training right now?</h2>
+      <p class="sub">Drag to set your balance. You can change it anytime — it just tunes what MileLift shows first.</p>
+
+      <div class="track"><div class="knob"></div></div>
+      <div class="poles"><span>Endurance</span><span>Balanced</span><span>Strength</span></div>
+      <div class="ratio"><span class="val">70 / 30</span><span class="lab">run / lift</span></div>
+
+      <div class="spacer"></div>
+      <button class="btn btn-primary">Next</button>
+      <p class="foot-link" style="margin-top:12px"><span style="color:var(--text-tertiary)">Skip for now</span></p>
+    </div>
+  </div>
+
+  <!-- 3. CONSENT - health -->
+  <div class="phone">
+    <span class="label">Consent · Health (point-of-use)</span>
+    <div class="col-gap">
+      <div style="opacity:.35;pointer-events:none">
+        <div class="brandrow">
+          <span class="meridian"><svg width="22" height="22" viewBox="0 0 26 26"><line x1="4" y1="20" x2="24" y2="20" stroke="#F5871F" stroke-width="2.5" stroke-linecap="round"/><line x1="4" y1="20" x2="4" y2="4" stroke="#38A9C9" stroke-width="2.5" stroke-linecap="round"/><circle cx="4" cy="20" r="3" fill="#EEF1F6"/></svg></span>
+          <span class="wm">Mile<span class="lift">Lift</span></span>
+        </div>
+        <div class="p-card" style="height:80px"></div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="sheet">
+        <div class="ic" style="background:var(--cyan-tint)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5DC1DC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>
+        </div>
+        <h3>Connect your health data?</h3>
+        <p>MileLift can read your workouts, heart rate, and sleep from Apple Health so training load and recovery reflect what your body actually did — not just what you typed in.</p>
+        <div class="wontdo"><span class="dot">—</span><span>It never shares your health data for ads or sells it. You choose per type what's shared; nothing is shared by default.</span></div>
+        <button class="btn btn-primary">Connect health data</button>
+        <button class="btn btn-secondary">Not now</button>
+        <p class="note">Turn this off anytime in Settings › Permissions &amp; data.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. PROFILE -->
+  <div class="phone">
+    <span class="label">Profile</span>
+    <div class="col-gap">
+      <div class="idrow" style="margin-bottom:22px">
+        <div class="avatar"></div>
+        <div>
+          <div class="nm">Sam Okafor</div>
+          <div class="hn">@sam.hybrid</div>
+        </div>
+      </div>
+
+      <div class="p-section">
+        <div class="p-head">
+          <span class="meridian"><svg width="14" height="14" viewBox="0 0 26 26"><line x1="4" y1="20" x2="22" y2="20" stroke="#F5871F" stroke-width="3" stroke-linecap="round"/><line x1="4" y1="20" x2="4" y2="6" stroke="#38A9C9" stroke-width="3" stroke-linecap="round"/><circle cx="4" cy="20" r="3.5" fill="#EEF1F6"/></svg></span>
+          Training balance
+        </div>
+        <div class="p-card">
+          <div class="ratio" style="justify-content:flex-start"><span class="val">70 / 30</span><span class="lab">run / lift</span></div>
+        </div>
+      </div>
+
+      <div class="p-section">
+        <div class="p-head">Units</div>
+        <div class="p-card">
+          <div class="p-row"><span class="k">Weight</span><span class="seg"><span>kg</span><span class="on">lb</span></span></div>
+          <div class="p-row"><span class="k">Distance</span><span class="seg"><span class="on">mi</span><span>km</span></span></div>
+        </div>
+      </div>
+
+      <div class="p-section">
+        <div class="p-head">Permissions &amp; data</div>
+        <div class="p-card">
+          <div class="p-row"><span class="k">Health data</span><span class="chip-on">On</span></div>
+          <div class="p-row"><span class="k">Location</span><span class="chip-on">On</span></div>
+          <div class="p-row"><span class="k">Camera</span><span class="chip-off">Off</span></div>
+        </div>
+      </div>
+
+      <p class="foot-link" style="margin-top:auto"><span style="color:var(--text-secondary)">Export my data</span> &nbsp;·&nbsp; <span style="color:var(--danger-500)">Delete account</span></p>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
