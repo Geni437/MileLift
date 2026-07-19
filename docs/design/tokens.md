@@ -75,6 +75,36 @@ what it *means* in the product).
 kept distinct from Voltage-violet so "error" never reads as "AI"),
 `feedback.warning` `#F5B830` gold, `feedback.info` reuses cyan.
 
+### 2.1 `color.map` — route rendering (added Phase 1, CORE-02)
+The activity detail map (`activity_routes.simplified_path`) needs named colors a
+map component can reference without hardcoding literals (production-standards: no
+magic values in a component). It is a **semantic alias group, not a new hue** —
+this was a deliberate hold-the-line decision against the design-reviewer "original,
+not generic" bar:
+
+| Token | Value | Meaning |
+| --- | --- | --- |
+| `map.route` | `accent.primary` (ember) | The route line. A recorded route **is the Mile drawn on the earth** — so it is literally the activity/energy color, not a new "map blue." This is the single most on-thesis reuse in the system. |
+| `map.routeCasing` | graphite-950 @55% (dark) / white @70% (light) | A contrast casing stroked under the ember line so it stays legible over any map-tile color. Not a brand color — a legibility device. |
+| `map.startMarker` | `accent.growth` | Start of the activity = "go"; growth already carries the go/confirmed meaning. |
+| `map.finishMarker` | `accent.primary` (ember) | Finish = the Meridian origin, rendered ember. |
+
+**Why no PR-celebration color was added.** The task explicitly floated a
+"PR-celebration accent" as a candidate token. We deliberately did **not** add one.
+A new celebratory hue (the reflex is medal-gold) would (a) reintroduce the medal/
+trophy/confetti cliché the anti-generic ledger (§7) exists to avoid, and (b)
+overload `feedback.warning` gold with a second meaning. A personal record in
+MileLift is celebrated through the **existing** language instead — the Meridian
+Mile axis extends past its previous mark and the origin flares in `accent.primary`
+(ember = peak effort/energy), with a `feedback.success` (growth) "New best" delta
+tag. Ember + growth + the signature carry it; the palette already serves this, so
+no token was added (see screens-phase-1.md §PR surfaces).
+
+**Map tile style.** The MapView uses a **dark, desaturated graphite tile style**
+(a custom style JSON), not the platform default colorful map — so the map screen
+stays inside the brand and the ember route is the one saturated thing on it. This
+is a design decision, not a default map drop-in (see screens-phase-1.md §CORE-02).
+
 ### Meaning-level color rules (so color is never decorative)
 - **Ember is spent, not sprinkled.** It marks the one primary action on a screen
   and activity/energy data. If two things on a screen are ember, one of them is

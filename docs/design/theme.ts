@@ -167,6 +167,18 @@ const darkColor = {
     info: palette.cyan[500],
     infoTint: palette.cyan.tint,
   },
+  // Map — route rendering over map tiles (Phase 1, CORE-02). The route line is
+  // "the Mile drawn on the earth," so it IS accent.primary (ember) — these are
+  // semantic aliases, NOT a new hue, so the map component references a named
+  // role instead of a raw palette value, and gains a tile-contrast casing plus
+  // start/finish markers the flat accent tokens don't express. Rationale in
+  // tokens.md §2.1. No new color family is introduced (design-reviewer floor).
+  map: {
+    route: palette.ember[500], // simplified_path stroke
+    routeCasing: 'rgba(11,15,22,0.55)', // graphite-950 @55% — dark casing so the ember line holds contrast over any tile color
+    startMarker: palette.growth[500], // start = go/begin (growth = "go")
+    finishMarker: palette.ember[500], // finish = the Meridian origin (ember)
+  },
   // Focus ring is intentionally cyan, NOT the ember CTA color, so a focused
   // primary button still shows a visible ring distinct from its own fill.
   focusRing: palette.cyan[400],
@@ -231,6 +243,12 @@ const lightColor: Widen<typeof darkColor> = {
     warningTint: palette.gold.tint,
     info: palette.cyan[600],
     infoTint: palette.cyan.tint,
+  },
+  map: {
+    route: palette.ember[600],
+    routeCasing: 'rgba(255,255,255,0.70)', // light casing over light daytime tiles
+    startMarker: palette.growth[600],
+    finishMarker: palette.ember[600],
   },
   focusRing: palette.cyan[600],
 };
