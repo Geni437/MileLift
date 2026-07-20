@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 
 import { useAuth } from './AuthContext';
 import { consentRepository } from '../db/repositories/consentRepository';
+import { healthConnectStateRepository } from '../db/repositories/healthConnectStateRepository';
 import { runSync } from '../sync/syncEngine';
 import { generateUuidV4 } from '../lib/uuid';
 import { env } from '../lib/env';
@@ -132,6 +133,16 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
       const active = categories[category].consent;
       if (!active) return;
       await consentRepository.revoke(active.id);
+      if (category === 'health') {
+        // M2 fix: write-back is on-device only and re-checks the active
+        // consent row on every sync (see useHealthConnect.ts writeBackOutbound),
+        // but that alone leaves `writeBackEnabled` sitting on in local state
+        // with no UI signal that it's now inert. Force it off here so the
+        // Health Connect section reflects reality immediately, rather than
+        // consent silently disappearing while the write-back toggle still
+        // reads "on".
+        await healthConnectStateRepository.setWriteBackEnabled(userId, false);
+      }
       void runSync('post-write').then(refresh);
       await refresh();
     },

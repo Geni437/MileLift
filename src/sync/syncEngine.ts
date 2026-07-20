@@ -8,6 +8,7 @@ import { consentRepository } from '../db/repositories/consentRepository';
 import {
   pullActivities,
   pullActivityAchievements,
+  pullActivityRoutes,
   pullPersonalRecords,
   pushActivities,
   refreshActivityTypesIfNeeded,
@@ -83,6 +84,12 @@ export async function runSync(_reason: 'startup' | 'foreground' | 'reconnect' | 
     await pushActivities(currentUserId);
     await pushWearableLinks();
     await pullActivities(currentUserId);
+    // Runs right after pullActivities so a freshly-pulled (or fresh-install/
+    // second-device) activity's route is backfilled in the same pass —
+    // see pullActivityRoutes' own doc comment for why this isn't folded
+    // into pullActivities itself (activity_routes is a separate table with
+    // its own write-once/backfill semantics).
+    await pullActivityRoutes(currentUserId);
     await pullPersonalRecords(currentUserId);
     await pullActivityAchievements(currentUserId);
   } finally {

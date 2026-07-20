@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type LatLng, type Region } from 'react-native-maps';
 
 import { theme } from '../../theme';
+import { env } from '../../lib/env';
 import type { Bounds } from '../../lib/geo';
 
 /**
@@ -67,20 +68,27 @@ export function RouteMap({ isOwnActivity, points, bounds, height = 220, tilesUna
         style={[styles.fallback, { height, backgroundColor: theme.color.bg.inset }]}
         accessibilityLabel="No route recorded for this activity"
       >
-        <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>No route data</Text>
+        <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>No route data</Text>
       </View>
     );
   }
 
   // The geometry itself is entirely local (already decoded on-device);
   // only the map TILES require network (design doc CORE-02: "Map tiles fail
-  // / offline" state — the route still draws on a plain surface).
-  if (tilesUnavailable) {
+  // / offline" state — the route still draws on a plain surface). Also fall
+  // back here — same rendering, different note — when no Google Maps API
+  // key was configured at build time: mounting a live `MapView` /
+  // `PROVIDER_GOOGLE` with no key renders broken/placeholder tiles on
+  // Android rather than gracefully degrading, and (unlike connectivity)
+  // whether a key exists is known at build time, not something to detect
+  // via a runtime tile-load-error callback.
+  const noMapsKey = !env.googleMapsApiKeyConfigured;
+  if (tilesUnavailable || noMapsKey) {
     return (
       <View style={[styles.fallback, { height, backgroundColor: theme.color.bg.inset }]}>
         <RouteOnlySvgFallback points={points} height={height} />
-        <Text style={[theme.type.caption, styles.offlineNote, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
-          Map tiles unavailable offline.
+        <Text style={[theme.type.caption, styles.offlineNote, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
+          {noMapsKey ? 'Map tiles unavailable — no Maps key configured for this build.' : 'Map tiles unavailable offline.'}
         </Text>
       </View>
     );
@@ -132,7 +140,7 @@ function RouteOnlySvgFallback({ points, height }: { points: RoutePoint[]; height
   return (
     <View style={[styles.svgFallback, { height: height - 24 }]}>
       <Text style={[theme.type.caption, { color: theme.color.accent.primary }]}>Route ({points.length} points)</Text>
-      <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} numberOfLines={1} maxFontSizeMultiplier={2}>
+      <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} numberOfLines={1} maxFontSizeMultiplier={2}>
         {`${((maxLat - minLat) * 111).toFixed(1)}km × ${((maxLng - minLng) * 111).toFixed(1)}km bounds`}
       </Text>
     </View>

@@ -41,6 +41,19 @@ export type WriteBackInput = {
   endTime: string; // ISO
   distanceMeters: number | null;
   totalCaloriesKcal: number | null; // magnitude, not signed
+  /**
+   * Caller's local activity id, used as the base for each inserted record's
+   * `metadata.clientRecordId`. Health Connect treats
+   * (this app's package, clientRecordId) as an idempotent upsert key — so if
+   * the app crashes or is killed after `insertRecords` succeeds but before
+   * the caller finishes recording the `wearable_links` outbound row, a retry
+   * with the SAME activity id updates the existing Health Connect record(s)
+   * in place rather than creating duplicates. This is the actual fix for
+   * "a retry writes the same MileLift activity to Health Connect a second
+   * time" — a local SQLite transaction alone can't cover an external
+   * platform write, only the local bookkeeping around it.
+   */
+  clientRecordId: string;
 };
 
 async function loadNativeModule() {
@@ -153,6 +166,7 @@ export const healthConnectClient = {
         title: input.title,
         startTime: input.startTime,
         endTime: input.endTime,
+        metadata: { clientRecordId: `${input.clientRecordId}:session` },
       },
     ];
     if (input.distanceMeters != null) {
@@ -161,6 +175,7 @@ export const healthConnectClient = {
         startTime: input.startTime,
         endTime: input.endTime,
         distance: { value: input.distanceMeters, unit: 'meters' },
+        metadata: { clientRecordId: `${input.clientRecordId}:distance` },
       });
     }
     if (input.totalCaloriesKcal != null) {
@@ -169,6 +184,7 @@ export const healthConnectClient = {
         startTime: input.startTime,
         endTime: input.endTime,
         energy: { value: input.totalCaloriesKcal, unit: 'kilocalories' },
+        metadata: { clientRecordId: `${input.clientRecordId}:calories` },
       });
     }
 

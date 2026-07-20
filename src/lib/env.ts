@@ -10,6 +10,14 @@ type Extra = {
   supabaseUrl: string;
   supabaseAnonKey: string;
   consentPurposeVersion: string;
+  /**
+   * Whether `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` was set at build time — NOT
+   * the key itself (see app.config.ts's comment on why the key never enters
+   * the JS bundle). Deliberately optional/non-fail-loud, unlike the
+   * Supabase values above: an unset Maps key is an expected, supported
+   * state (RouteMap's local-geometry fallback), not a broken build.
+   */
+  googleMapsApiKeyConfigured: boolean;
 };
 
 function readExtra(): Extra {
@@ -26,6 +34,7 @@ function readExtra(): Extra {
     supabaseUrl: extra.supabaseUrl,
     supabaseAnonKey: extra.supabaseAnonKey,
     consentPurposeVersion: extra.consentPurposeVersion,
+    googleMapsApiKeyConfigured: extra.googleMapsApiKeyConfigured === true,
   };
 }
 

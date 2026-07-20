@@ -47,11 +47,9 @@ export function useActivityLog(userId: string | null) {
       setNextCursor(page.nextCursor);
       setActivityTypes(new Map(types.map((t) => [t.code, t])));
 
-      const prSet = new Set<string>();
-      for (const activity of page.items) {
-        const achievements = await activityAchievementsRepository.getForActivity(activity.id);
-        if (achievements.length > 0) prSet.add(activity.id);
-      }
+      // One batched query for the whole page instead of one SELECT per
+      // activity (was a 20-query N+1 per page load).
+      const prSet = await activityAchievementsRepository.getForActivities(page.items.map((a) => a.id));
       setPrByActivityId(prSet);
 
       setLoadState(page.items.length === 0 ? 'empty' : 'ready');
@@ -76,16 +74,12 @@ export function useActivityLog(userId: string | null) {
       const page = await activityRepository.listPage(userId, nextCursor, PAGE_SIZE);
       setActivities((prev) => [...prev, ...page.items]);
       setNextCursor(page.nextCursor);
-      const prSet = new Set(prByActivityId);
-      for (const activity of page.items) {
-        const achievements = await activityAchievementsRepository.getForActivity(activity.id);
-        if (achievements.length > 0) prSet.add(activity.id);
-      }
-      setPrByActivityId(prSet);
+      const newlyHasPr = await activityAchievementsRepository.getForActivities(page.items.map((a) => a.id));
+      setPrByActivityId((prev) => new Set([...prev, ...newlyHasPr]));
     } finally {
       setLoadingMore(false);
     }
-  }, [userId, nextCursor, loadingMore, prByActivityId]);
+  }, [userId, nextCursor, loadingMore]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);

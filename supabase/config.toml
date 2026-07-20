@@ -397,6 +397,19 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# security-auditor finding (Phase 1 / Module A, gc-activity-tracks review):
+# this function's authorization model was previously relying on the
+# platform's *default* verify_jwt=true behavior for Edge Functions without
+# that default being pinned anywhere in this file. Pinning it explicitly here
+# means the security model doesn't silently depend on an unstated platform
+# default that a future engineer could flip off (e.g. while wiring up what
+# looks like a cron/webhook handler) without knowing this function's
+# authorization depends on it. Belt-and-suspenders: the function itself also
+# no longer trusts the (unverified-by-app-code) JWT claims even with this on
+# — see supabase/functions/gc-activity-tracks/index.ts's header comment.
+[functions.gc-activity-tracks]
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327

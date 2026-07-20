@@ -1,5 +1,6 @@
 import {
   computeBounds,
+  computeBoundsFromGeoJsonLineString,
   computeRollingSpeedMps,
   computeTrackSummary,
   geoJsonLineStringToPoints,
@@ -175,5 +176,32 @@ describe('computeBounds', () => {
   it('computes a bounding box across points', () => {
     const bounds = computeBounds([point(1, 2, 't0'), point(-1, 5, 't1'), point(0, -3, 't2')]);
     expect(bounds).toEqual({ minLat: -1, maxLat: 1, minLng: -3, maxLng: 5 });
+  });
+
+  it('accepts bare {latitude,longitude} points with no accuracyM/recordedAt (the shape decoded from a server-pulled GeoJSON route)', () => {
+    const bounds = computeBounds([
+      { latitude: 1, longitude: 2 },
+      { latitude: -1, longitude: 5 },
+    ]);
+    expect(bounds).toEqual({ minLat: -1, maxLat: 1, minLng: 2, maxLng: 5 });
+  });
+});
+
+describe('computeBoundsFromGeoJsonLineString', () => {
+  it('derives the same bounding box a server-pulled route (activitySync.pullActivityRoutes) would need, with no local raw points available', () => {
+    const geojson = JSON.stringify({
+      type: 'LineString',
+      coordinates: [
+        [2, 1, 10],
+        [5, -1, 12],
+        [-3, 0, 11],
+      ],
+    });
+    expect(computeBoundsFromGeoJsonLineString(geojson)).toEqual({ minLat: -1, maxLat: 1, minLng: -3, maxLng: 5 });
+  });
+
+  it('returns null for malformed GeoJSON rather than throwing', () => {
+    expect(computeBoundsFromGeoJsonLineString('not json')).toBeNull();
+    expect(computeBoundsFromGeoJsonLineString('{"type":"Point","coordinates":[0,0]}')).toBeNull();
   });
 });

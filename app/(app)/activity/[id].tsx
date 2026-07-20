@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -13,6 +13,7 @@ import { SecondaryButton } from '../../../src/components/SecondaryButton';
 import { Field } from '../../../src/components/Field';
 import { SyncStatusPill } from '../../../src/components/SyncStatusPill';
 import { MeridianMark } from '../../../src/components/MeridianMark';
+import { ConfirmSheet } from '../../../src/components/ConfirmSheet';
 import { MetricBar, type MetricBarItem } from '../../../src/components/activity/MetricBar';
 import { MeridianTrace } from '../../../src/components/activity/MeridianTrace';
 import { RouteMap } from '../../../src/components/activity/RouteMap';
@@ -28,6 +29,8 @@ export default function ActivityDetailScreen() {
   const { loadState, activity, activityType, routePoints, bounds, achievements, kudosCount, deleteActivity, editActivity } =
     useActivityDetail(id);
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (loadState === 'loading') {
     return (
@@ -67,16 +70,18 @@ export default function ActivityDetailScreen() {
     : [{ key: 'duration', value: formatDuration(activity.durationSeconds), label: 'Duration' }];
 
   const handleDelete = () => {
-    Alert.alert('Delete this activity?', "This can't be undone.", [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          void deleteActivity().then(() => router.back());
-        },
-      },
-    ]);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteActivity();
+      setDeleteConfirmOpen(false);
+      router.back();
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -86,7 +91,7 @@ export default function ActivityDetailScreen() {
       ) : (
         <View style={[styles.manualHeader, { backgroundColor: theme.color.bg.raised }]}>
           <MeridianMark variant="seed" size={40} />
-          <Text style={[theme.type.overline, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.8}>
+          <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
             MANUAL ENTRY
           </Text>
         </View>
@@ -104,6 +109,22 @@ export default function ActivityDetailScreen() {
 
       <MetricBar items={metricItems} />
 
+      {/* screens-phase-1.md §"Detail screen": "Elapsed time sits under
+          Moving time as a type.metricSm secondary." Moving time (above,
+          `movingTimeSeconds`) stops while paused; Elapsed is the spine's
+          `duration_seconds`, which keeps counting through pauses — only
+          meaningful to show separately when the activity has a Moving-time
+          metric at all (distance-based activities). */}
+      {isDistanceBased && (
+        <Text
+          style={[theme.type.metricSm, theme.fontVariation.metric, { color: theme.color.text.secondary }]}
+          maxFontSizeMultiplier={1.6}
+          accessibilityLabel={`Elapsed: ${formatDuration(activity.durationSeconds)}`}
+        >
+          Elapsed {formatDuration(activity.durationSeconds)}
+        </Text>
+      )}
+
       {activity.hasGpsRoute && (
         <MeridianTrace variant="static" height={80} series={normalizeSeries(routePoints.map((p) => p.elevationM ?? 0))} />
       )}
@@ -120,7 +141,7 @@ export default function ActivityDetailScreen() {
 
       {achievements.length > 0 && (
         <View style={styles.achievements}>
-          <Text style={[theme.type.overline, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.8}>
+          <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
             ACHIEVEMENTS
           </Text>
           {achievements.map((a) => (
@@ -134,7 +155,7 @@ export default function ActivityDetailScreen() {
       {/* Kudos — reserved, non-interactive spot (design doc CORE-02 point 8). No Phase 1 cross-user interaction to wire yet. */}
       <View style={styles.kudosRow} accessibilityLabel={`${kudosCount} kudos`}>
         <MeridianMark variant="glyph" size={20} />
-        <Text style={[theme.type.body, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>{kudosCount} Kudos</Text>
+        <Text style={[theme.type.body, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>{kudosCount} Kudos</Text>
       </View>
 
       <View style={styles.actions}>
@@ -151,6 +172,16 @@ export default function ActivityDetailScreen() {
           await editActivity({ title: title || null, description: description || null });
           setEditOpen(false);
         }}
+      />
+
+      <ConfirmSheet
+        visible={deleteConfirmOpen}
+        title="Delete this activity?"
+        body="This can't be undone."
+        confirmLabel="Delete"
+        loading={deleting}
+        onConfirm={() => void handleConfirmDelete()}
+        onCancel={() => setDeleteConfirmOpen(false)}
       />
     </Screen>
   );

@@ -85,7 +85,7 @@ export function TypePicker({ types, selectedCode, onSelect, locked }: Props) {
       </View>
 
       {locked && selected && (
-        <Text style={[theme.type.caption, styles.lockedNote, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+        <Text style={[theme.type.caption, styles.lockedNote, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
           Activity type locked while recording.
         </Text>
       )}
@@ -99,7 +99,7 @@ export function TypePicker({ types, selectedCode, onSelect, locked }: Props) {
               <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
                 {grouped.map(([category, list]) => (
                   <View key={category} style={styles.group}>
-                    <Text style={[theme.type.overline, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.8}>
+                    <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
                       {CATEGORY_LABEL[category].toUpperCase()}
                     </Text>
                     {list.map((type) => (

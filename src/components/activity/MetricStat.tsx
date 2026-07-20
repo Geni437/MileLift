@@ -40,13 +40,13 @@ export function MetricStat({ value, unit, label, size = 'primary', accessibility
           {value}
         </Text>
         {unit ? (
-          <Text style={[theme.type.label, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.6}>
+          <Text style={[theme.type.label, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.6}>
             {' '}
             {unit}
           </Text>
         ) : null}
       </View>
-      <Text style={[theme.type.overline, styles.label, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.8}>
+      <Text style={[theme.type.overline, styles.label, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
         {label.toUpperCase()}
       </Text>
     </View>

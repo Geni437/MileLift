@@ -195,8 +195,13 @@ export function trackToGeoJsonLineString(points: TrackPoint[]): string {
 
 export type Bounds = { minLat: number; maxLat: number; minLng: number; maxLng: number };
 
-/** Bounding box for camera-fit (RouteMap) and feed thumbnails — local equivalent of `ST_Envelope`. */
-export function computeBounds(points: TrackPoint[]): Bounds | null {
+/**
+ * Bounding box for camera-fit (RouteMap) and feed thumbnails — local
+ * equivalent of `ST_Envelope`. Typed against just the lat/lng shape (not the
+ * full `TrackPoint`) so it also works on points decoded from a server-pulled
+ * GeoJSON route, which never carry `accuracyM`/`recordedAt`.
+ */
+export function computeBounds(points: { latitude: number; longitude: number }[]): Bounds | null {
   if (points.length === 0) return null;
   let minLat = Infinity;
   let maxLat = -Infinity;
@@ -209,6 +214,18 @@ export function computeBounds(points: TrackPoint[]): Bounds | null {
     if (p.longitude > maxLng) maxLng = p.longitude;
   }
   return { minLat, maxLat, minLng, maxLng };
+}
+
+/**
+ * Bounding box derived from a GeoJSON LineString `text` — used when pulling
+ * a route recorded on a *different* device/before a reinstall (architecture
+ * gap closed by `activitySync.pullActivityRoutes`), where there are no local
+ * raw GPS points to run `computeBounds` on directly, only the simplified
+ * GeoJSON the server hands back. Malformed/legacy input degrades to `null`
+ * via `geoJsonLineStringToPoints`, never a throw.
+ */
+export function computeBoundsFromGeoJsonLineString(geojson: string): Bounds | null {
+  return computeBounds(geoJsonLineStringToPoints(geojson));
 }
 
 const DEFAULT_ROLLING_PACE_WINDOW_SECONDS = 60;

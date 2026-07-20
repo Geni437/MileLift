@@ -93,4 +93,67 @@ export const activityRoutesRepository = {
     );
     return rows.map(toLocal);
   },
+
+  /**
+   * Of the given activity ids, returns the subset with no local
+   * `activity_routes` row yet — the backfill target set for
+   * `activitySync.pullActivityRoutes` (a route recorded on a different
+   * device, or before a reinstall, is never persisted here until pulled).
+   */
+  async getMissingActivityIds(activityIds: string[]): Promise<string[]> {
+    if (activityIds.length === 0) return [];
+    const db = await getDb();
+    const placeholders = activityIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ activity_id: string }>(
+      `SELECT activity_id FROM activity_routes WHERE activity_id IN (${placeholders})`,
+      activityIds
+    );
+    const present = new Set(rows.map((r) => r.activity_id));
+    return activityIds.filter((id) => !present.has(id));
+  },
+
+  /**
+   * Persists a route pulled FROM the server (`activitySync.pullActivityRoutes`)
+   * — distinct from `save()`, which is for a route this device just finished
+   * recording and still needs to upload. A server-pulled route's raw track is
+   * already durably in Storage (this device just doesn't have the raw points
+   * locally to re-upload even if it wanted to), so it's stored as `uploaded`
+   * up front rather than `pending` — leaving it `pending` would make a future
+   * upload-retry job attempt to re-upload points that were never recorded on
+   * this device.
+   */
+  async saveFromServer(route: {
+    activityId: string;
+    simplifiedGeojson: string;
+    boundsJson: string | null;
+    rawTrackObjectPath: string;
+    rawTrackChecksum: string | null;
+    rawPointCount: number | null;
+    simplifiedPointCount: number | null;
+  }): Promise<void> {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT INTO activity_routes (activity_id, simplified_geojson, bounds_json, raw_track_object_path, raw_track_checksum, raw_point_count, simplified_point_count, raw_track_upload_status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'uploaded', ?)
+       ON CONFLICT(activity_id) DO UPDATE SET
+         simplified_geojson = excluded.simplified_geojson,
+         bounds_json = excluded.bounds_json,
+         raw_track_object_path = excluded.raw_track_object_path,
+         raw_track_checksum = excluded.raw_track_checksum,
+         raw_point_count = excluded.raw_point_count,
+         simplified_point_count = excluded.simplified_point_count,
+         raw_track_upload_status = 'uploaded'`,
+      [
+        route.activityId,
+        route.simplifiedGeojson,
+        route.boundsJson,
+        route.rawTrackObjectPath,
+        route.rawTrackChecksum,
+        route.rawPointCount,
+        route.simplifiedPointCount,
+        now,
+      ]
+    );
+  },
 };

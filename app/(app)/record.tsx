@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -9,6 +9,8 @@ import { SecondaryButton } from '../../src/components/SecondaryButton';
 import { TextButton } from '../../src/components/TextButton';
 import { Field } from '../../src/components/Field';
 import { InlineBanner } from '../../src/components/InlineBanner';
+import { SkeletonBlock } from '../../src/components/SkeletonBlock';
+import { ConfirmSheet } from '../../src/components/ConfirmSheet';
 import { ConsentSheet } from '../../src/components/consent/ConsentSheet';
 import { MetricStat } from '../../src/components/activity/MetricStat';
 import { MetricBar, type MetricBarItem } from '../../src/components/activity/MetricBar';
@@ -27,6 +29,9 @@ import { useProfile } from '../../src/state/ProfileContext';
 import { useConsent } from '../../src/state/ConsentContext';
 import type { ActivityType } from '../../src/db/types';
 
+/** Shape constant for the live MeridianTrace's asymptotic growth curve — see the `liveTraceProgress` comment below. Not a duration target. */
+const LIVE_TRACE_REFERENCE_SECONDS = 20 * 60;
+
 export default function RecordScreen() {
   const { userId } = useAuth();
   const { profile } = useProfile();
@@ -42,6 +47,8 @@ export default function RecordScreen() {
   const [showMap, setShowMap] = useState(false);
   const [finishDraft, setFinishDraft] = useState<FinishDraft | null>(null);
   const [recoveredTypeCode, setRecoveredTypeCode] = useState<string | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
 
   useEffect(() => {
     void activityTypesRepository.getAll().then((types) => {
@@ -138,22 +145,28 @@ export default function RecordScreen() {
   };
 
   const handleDiscardPress = () => {
-    Alert.alert('Discard this recording?', "The route and time are deleted and can't be recovered.", [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Discard',
-        style: 'destructive',
-        onPress: () => {
-          void engine.discard().then(() => router.back());
-        },
-      },
-    ]);
+    setShowDiscardConfirm(true);
+  };
+
+  const handleConfirmDiscard = async () => {
+    setDiscarding(true);
+    try {
+      await engine.discard();
+      setShowDiscardConfirm(false);
+      router.back();
+    } finally {
+      setDiscarding(false);
+    }
   };
 
   if (engine.loading) {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.color.bg.canvas }]}>
-        <View style={styles.center} />
+        <View style={styles.content}>
+          <SkeletonBlock height={64} width={160} radius={theme.radius.md} />
+          <SkeletonBlock height={180} radius={theme.radius.lg} />
+          <SkeletonBlock height={60} radius={theme.radius.md} />
+        </View>
       </SafeAreaView>
     );
   }
@@ -209,6 +222,19 @@ export default function RecordScreen() {
   const status = engine.status;
   const gpsGranted = engine.selectedType?.supportsGps && !locationConsentDeclinedOrRevoked;
 
+  // screens-phase-1.md §A: the live MeridianTrace "grows continuously — it
+  // is not a fill-to-100% bar (a free run has no target); it is a living
+  // axis." An elapsed/3600s fill would sit maxed-out and unmoving for the
+  // rest of any run over an hour, which is exactly the rejected pattern.
+  // Judgment call: use an asymptotic curve (elapsed / (elapsed + reference))
+  // instead — it keeps inching forward for as long as the run runs (it
+  // mathematically never reaches 1 for finite elapsed, so there is no
+  // hidden target line to hit), while still moving briskly during a
+  // "typical" run length so the trace doesn't read as inert early on.
+  // `LIVE_TRACE_REFERENCE_SECONDS` is a growth-curve shape constant, not a
+  // duration target — it is never surfaced to the user.
+  const liveTraceProgress = engine.liveElapsedSeconds / (engine.liveElapsedSeconds + LIVE_TRACE_REFERENCE_SECONDS);
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.color.bg.canvas }]}>
       <View style={styles.topBar}>
@@ -225,7 +251,7 @@ export default function RecordScreen() {
 
       <View style={styles.content}>
         {status === 'ready' && (
-          <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+          <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
             Getting a GPS fix — you can start now, the route begins once it locks.
           </Text>
         )}
@@ -243,10 +269,23 @@ export default function RecordScreen() {
           <MetricStat value={heroValue} unit={heroUnit} label={heroLabel} size="hero" />
         </Pressable>
 
+        {/* screens-phase-1.md: "a secondary type.metricSm 'Elapsed' (the
+            spine's duration_seconds, keeps counting through pauses) sits
+            under the hero so both model fields are honest and visible." The
+            hero above is moving time (engine.liveMovingSeconds, stops while
+            paused); this is the spine's duration_seconds, which does not. */}
+        <Text
+          style={[theme.type.metricSm, theme.fontVariation.metric, { color: theme.color.text.secondary }]}
+          maxFontSizeMultiplier={1.6}
+          accessibilityLabel={`Elapsed: ${formatDuration(engine.liveElapsedSeconds)}, keeps counting through pauses`}
+        >
+          Elapsed {formatDuration(engine.liveElapsedSeconds)}
+        </Text>
+
         {showMap && gpsGranted ? (
           <RouteMap isOwnActivity points={engine.points} bounds={null} height={180} />
         ) : (
-          <MeridianTrace variant={status === 'ready' ? 'empty' : 'live'} progress={Math.min(1, engine.liveElapsedSeconds / 3600)} />
+          <MeridianTrace variant={status === 'ready' ? 'empty' : 'live'} progress={liveTraceProgress} />
         )}
 
         <MetricBar items={secondaryItems} size="inline" />
@@ -273,6 +312,16 @@ export default function RecordScreen() {
         loading={consentLoading}
         onAllow={() => void handleAllowLocation()}
         onDecline={() => void handleDeclineLocation()}
+      />
+
+      <ConfirmSheet
+        visible={showDiscardConfirm}
+        title="Discard this recording?"
+        body="The route and time are deleted and can't be recovered."
+        confirmLabel="Discard"
+        loading={discarding}
+        onConfirm={() => void handleConfirmDiscard()}
+        onCancel={() => setShowDiscardConfirm(false)}
       />
 
       {finishDraft && (
@@ -349,9 +398,6 @@ function SaveSheet({
 
 const styles = StyleSheet.create({
   safe: {
-    flex: 1,
-  },
-  center: {
     flex: 1,
   },
   topBar: {

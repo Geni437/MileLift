@@ -44,12 +44,42 @@
 // Authorization: this function must only ever run as the scheduler (pg_cron
 // / Supabase's scheduled-invocation mechanism, both of which authenticate
 // with the service-role key), never a normal end user hitting the function
-// URL. Supabase's edge runtime already verifies the incoming JWT's signature
-// before this code runs (default `verify_jwt = true` — do NOT disable this
-// for this function); this handler additionally checks the verified JWT's
-// `role` claim is exactly `service_role` and rejects anything else with 403,
-// so a valid-but-ordinary user JWT can reach the handler but is still turned
-// away before any Storage/DB access happens.
+// URL, and never a forged/unsigned token.
+//
+// security-auditor review (Phase 1 / Module A) flagged the original version
+// of this check as a launch-blocker: it decoded the JWT payload with a plain
+// base64 decode and checked only `claims.role === "service_role"`, with NO
+// signature verification in application code. That was only safe because
+// Supabase's platform-level `verify_jwt` setting happens to default to
+// `true` for Edge Functions -- a default that was not pinned anywhere in
+// this project's config. If `verify_jwt` were ever disabled for this
+// function (easy to do by accident, or by a future engineer wiring up what
+// looks like a cron/webhook endpoint without knowing this function's
+// security model depends on it), an unauthenticated caller could send a
+// forged bearer token with an unsigned `{"role":"service_role"}` payload,
+// have it decoded and pass the role check, and then have the handler run
+// with the real `SUPABASE_SERVICE_ROLE_KEY` from its environment --
+// full read/delete access to every user's Storage objects.
+//
+// Fixed two ways, deliberately redundant (defense in depth):
+//   1. `supabase/config.toml` now pins `[functions.gc-activity-tracks]`
+//      `verify_jwt = true` explicitly, so the platform-level JWT signature
+//      check is no longer an unstated default.
+//   2. This handler no longer trusts ANY decoded-but-unverified JWT claim.
+//      Instead it does a direct constant-time comparison of the incoming
+//      bearer token against this function's own `SUPABASE_SERVICE_ROLE_KEY`
+//      env var (see `isAuthorizedServiceRoleCaller` below). This function has
+//      exactly one legitimate caller -- the scheduler, authenticating with
+//      the service-role key -- so comparing the raw token against the one
+//      key this function is itself configured to use is simpler and
+//      strictly stronger than general-purpose JWT signature verification
+//      here: it doesn't matter whether the token is even shaped like a JWT,
+//      whether it's expired, or what claims it carries, because the only
+//      thing that can possibly equal this project's service-role key is
+//      this project's service-role key. This makes the handler
+//      self-protecting even if `verify_jwt` is ever flipped off for this
+//      function (by mistake or otherwise) -- the 403 below no longer
+//      depends on that platform setting at all.
 //
 // Invocation (deploy-time config, devops-engineer's follow-up — documented
 // here, not built into this file, per this project's CI/CD doc's explicit
@@ -104,38 +134,53 @@ interface GcSummary {
   cappedByObjectLimit: boolean;
 }
 
-function decodeJwtPayload(authorizationHeader: string | null): Record<string, unknown> | null {
+function extractBearerToken(authorizationHeader: string | null): string | null {
   if (!authorizationHeader) return null;
   const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
-  if (!match) return null;
-  const token = match[1];
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const payloadJson = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
-    return JSON.parse(payloadJson) as Record<string, unknown>;
-  } catch {
-    return null;
+  return match ? match[1] : null;
+}
+
+// Constant-time string comparison -- deliberately not `a === b`. A
+// short-circuiting equality check on a secret comparison leaks (via
+// response-time variance) how many leading bytes matched, which is a real
+// timing side-channel for a value as sensitive as the service-role key.
+// Both inputs are encoded to bytes and every byte position is compared
+// regardless of earlier mismatches; the byte-length check is done via a
+// fixed-size accumulator rather than an early `return false` so the length
+// mismatch case doesn't short-circuit either.
+function timingSafeEqual(a: string, b: string): boolean {
+  const aBytes = new TextEncoder().encode(a);
+  const bBytes = new TextEncoder().encode(b);
+  const maxLength = Math.max(aBytes.length, bBytes.length, 1);
+  let mismatch = aBytes.length === bBytes.length ? 0 : 1;
+  for (let i = 0; i < maxLength; i++) {
+    const aByte = i < aBytes.length ? aBytes[i] : 0;
+    const bByte = i < bBytes.length ? bBytes[i] : 0;
+    mismatch |= aByte ^ bByte;
   }
+  return mismatch === 0;
+}
+
+// This function has exactly one legitimate caller: the scheduler,
+// authenticating with the project's service-role key (see header comment
+// for why a direct token comparison is the right model here, not general
+// JWT verification). Both an absent/malformed Authorization header and a
+// token that doesn't byte-for-byte match the real service-role key are
+// rejected identically.
+function isAuthorizedServiceRoleCaller(req: Request, serviceRoleKey: string): boolean {
+  const token = extractBearerToken(req.headers.get("Authorization"));
+  if (!token) return false;
+  return timingSafeEqual(token, serviceRoleKey);
 }
 
 Deno.serve(async (req: Request) => {
   // ---------------------------------------------------------------------
-  // Authorization: service_role callers only (see header comment). The
-  // platform has already verified this JWT's signature/expiry before this
-  // code runs (verify_jwt defaults to true for this function); we only
-  // need to check the role claim it carried.
+  // Fetch service credentials first: the authorization check below compares
+  // the caller's bearer token directly against SUPABASE_SERVICE_ROLE_KEY, so
+  // it needs this value before it can authorize anything. If the function's
+  // own environment isn't configured, fail closed with 500 rather than
+  // falling through to a comparison against `undefined`.
   // ---------------------------------------------------------------------
-  const claims = decodeJwtPayload(req.headers.get("Authorization"));
-  if (!claims || claims.role !== "service_role") {
-    return new Response(
-      JSON.stringify({
-        error: { code: "FORBIDDEN", message: "gc-activity-tracks may only be invoked with the service-role key.", field: null },
-      }),
-      { status: 403, headers: { "content-type": "application/json" } }
-    );
-  }
-
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !serviceRoleKey) {
@@ -143,6 +188,22 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({ error: { code: "MISCONFIGURED", message: "Missing Supabase service credentials in function environment.", field: null } }),
       { status: 500, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Authorization: service_role callers only (see header comment). This
+  // does NOT rely on decoding/trusting JWT claims -- the incoming bearer
+  // token must literally be this project's service-role key. `verify_jwt`
+  // being pinned `true` in config.toml is a second, independent layer on
+  // top of this, not a substitute for it.
+  // ---------------------------------------------------------------------
+  if (!isAuthorizedServiceRoleCaller(req, serviceRoleKey)) {
+    return new Response(
+      JSON.stringify({
+        error: { code: "FORBIDDEN", message: "gc-activity-tracks may only be invoked with the service-role key.", field: null },
+      }),
+      { status: 403, headers: { "content-type": "application/json" } }
     );
   }
 

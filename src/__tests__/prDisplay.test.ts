@@ -25,6 +25,13 @@ describe('formatPrValue', () => {
   it('formats an elevation PR in whole meters', () => {
     expect(formatPrValue('most_elevation_gain', 812.6, 'km')).toBe('813 m');
   });
+
+  it('formats a distance PR in miles when the snapshot unit is mi', () => {
+    // unit_distance_snapshot is what freezes the *display* unit at log time
+    // (architecture §1.3) — a mi-logged PR must never silently render in km,
+    // and vice versa, regardless of the user's *current* profile setting.
+    expect(formatPrValue('longest_distance', 16093.44, 'mi')).toBe('10.00 mi');
+  });
 });
 
 describe('formatPrDelta', () => {
@@ -41,5 +48,29 @@ describe('formatPrDelta', () => {
     const previousSpeedMps = 1000 / 360;
     const newSpeedMps = 1000 / 330;
     expect(formatPrDelta('fastest_avg_pace', newSpeedMps, previousSpeedMps, 'km')).toBe('-0:30/km over your last best');
+  });
+
+  it('formats a duration delta', () => {
+    // 3725s (1:02:05) over a previous 3600s (1:00:00) best -> +125s = 2:05
+    expect(formatPrDelta('longest_duration', 3725, 3600, 'km')).toBe('+2:05 over your last best');
+  });
+
+  it('formats an elevation delta in whole meters', () => {
+    expect(formatPrDelta('most_elevation_gain', 950.2, 800.6, 'km')).toBe('+150 m over your last best');
+  });
+
+  it('returns null for a pace delta when the previous value could not have produced a real pace (0 mps guard)', () => {
+    // paceSecondsPerUnit returns null for speedMps <= 0 — a defensive guard
+    // against a divide-by-zero "Infinity:NaN" ever reaching the UI, per
+    // lib/format.ts. Exercised here at the formatPrDelta seam because that
+    // guard is otherwise silently swallowed.
+    expect(formatPrDelta('fastest_avg_pace', 3.0, 0, 'km')).toBeNull();
+  });
+
+  it('formats a distance delta correctly when the snapshot unit is mi', () => {
+    // previousValue/value are canonical meters; the delta must convert using
+    // the *same* mi snapshot, not km, per the unit-snapshot discipline (§1.3).
+    const oneMileM = 1609.344;
+    expect(formatPrDelta('longest_distance', oneMileM * 5, oneMileM * 4, 'mi')).toBe('+1.00 mi over your last best');
   });
 });

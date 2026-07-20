@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { theme } from '../../theme';
@@ -12,6 +12,7 @@ import type { UnitDistanceSnapshot } from '../../db/types';
 type Props = {
   userId: string | null;
   unitDistance: UnitDistanceSnapshot;
+  hasHealthConsent: boolean;
   onRequestHealthConsent: () => Promise<{ ok: boolean }>;
 };
 
@@ -21,16 +22,28 @@ type Props = {
  * the OS/Health Connect permission grant, P0 §E rule 5) — this component
  * does not invent new consent copy.
  */
-export function HealthConnectSection({ userId, unitDistance, onRequestHealthConsent }: Props) {
-  const { state, syncing, platformGate, connect, syncNow, setWriteBackEnabled } = useHealthConnect(userId, unitDistance);
+export function HealthConnectSection({ userId, unitDistance, hasHealthConsent, onRequestHealthConsent }: Props) {
+  const { state, syncing, platformGate, connect, syncNow, setWriteBackEnabled, refresh } = useHealthConnect(userId, unitDistance);
   const [consentSheetOpen, setConsentSheetOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
 
+  useEffect(() => {
+    // M2 fix: this hook's `state` is loaded once locally and doesn't
+    // subscribe to ConsentContext, so if `health` consent is revoked
+    // elsewhere on this same screen (PermissionsSection) while this section
+    // is mounted, `state.writeBackEnabled` would otherwise sit stale at
+    // `true` in memory even though ConsentContext.revoke already persisted
+    // `writeBackEnabled = false` to local storage. Re-pull from storage so
+    // the toggle reflects reality without requiring a remount.
+    if (!hasHealthConsent) void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasHealthConsent]);
+
   if (platformGate === 'ios_unsupported') {
     return (
       <SectionCard title="Apps & devices">
-        <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+        <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
           Health Connect is Android-only. Apple Health support is coming.
         </Text>
       </SectionCard>
@@ -105,11 +118,11 @@ export function HealthConnectSection({ userId, unitDistance, onRequestHealthCons
         <TextButton label="Sync now" onPress={() => void syncNow()} />
       )}
 
-      {state.connected && (
+      {state.connected && hasHealthConsent && (
         <View style={styles.writeBackRow}>
           <View style={styles.rowText}>
             <Text style={[theme.type.body, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.8}>Also write my MileLift activities to Health Connect</Text>
-            <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+            <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
               Sends the session, distance, and calories — not your route. Your map stays in MileLift.
             </Text>
           </View>
@@ -118,6 +131,11 @@ export function HealthConnectSection({ userId, unitDistance, onRequestHealthCons
             onPress={() => void setWriteBackEnabled(!state.writeBackEnabled)}
           />
         </View>
+      )}
+      {state.connected && !hasHealthConsent && (
+        <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
+          Health consent is off, so MileLift won&apos;t write activities back to Health Connect. Re-enable Health consent above to turn write-back back on.
+        </Text>
       )}
 
       <ConsentSheet

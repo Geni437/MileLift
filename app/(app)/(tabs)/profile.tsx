@@ -81,6 +81,7 @@ export default function ProfileScreen() {
       <HealthConnectSection
         userId={userId}
         unitDistance={profile.unitDistance}
+        hasHealthConsent={!!categories.health.consent}
         onRequestHealthConsent={async () => {
           const result = await grant('health');
           return { ok: result.ok };

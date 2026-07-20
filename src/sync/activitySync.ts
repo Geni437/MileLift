@@ -10,6 +10,7 @@ import { activityAchievementsRepository } from '../db/repositories/activityAchie
 import { syncCursorRepository } from '../db/repositories/syncCursorRepository';
 import { activityTypesRepository } from '../db/repositories/activityTypesRepository';
 import { diffAchievements } from '../features/activity/prEngine';
+import { computeBoundsFromGeoJsonLineString } from '../lib/geo';
 import type { LocalActivity, PrMetric, AchievementRank } from '../db/types';
 
 /**
@@ -29,6 +30,9 @@ import type { LocalActivity, PrMetric, AchievementRank } from '../db/types';
 
 const ACTIVITIES_CURSOR_KEY = 'activities_updated_at';
 const PULL_PAGE_SIZE = 200;
+
+/** `.in('timeline_event_id', ...)` batch size for `pullActivityRoutes` — keeps a single request URL/body a reasonable size on an account with a large backfill. */
+const ROUTE_PULL_BATCH_SIZE = 50;
 
 type SaveActivityRpcResponse = {
   data?: {
@@ -223,13 +227,25 @@ async function reconcilePrs(
   for (const metric of retracted) {
     await activityAchievementsRepository.retract(activity.id, metric);
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('personal_records')
       .select('*')
       .eq('user_id', activity.userId)
       .eq('activity_type_code', activity.activityTypeCode)
       .eq('metric', metric)
       .maybeSingle();
+
+    // A network failure here is NOT the same thing as "the server confirms
+    // no PR exists for this metric" — every other pull in this file/
+    // syncEngine.ts leaves local state untouched on `error` rather than
+    // treating it as an empty result (`if (error || !data) return;`). Scoped
+    // to `continue` rather than a bare early return since this sits inside a
+    // per-metric loop — a transient failure looking up ONE retracted
+    // metric's current record shouldn't also skip reconciling the others.
+    // The badge itself was already (correctly) retracted above; only the
+    // "what's the true current record now" lookup is skipped, and it's
+    // retried on the next sync.
+    if (error) continue;
 
     if (data) {
       await personalRecordsRepository.reconcileFromServerRow(
@@ -262,17 +278,10 @@ async function reconcilePrs(
  * together). A local row with an unsynced edit/delete is left untouched
  * (activityRepository.reconcileFromServer honors that).
  *
- * KNOWN GAP (flagged, not silently skipped): this does not re-hydrate
- * `activity_routes` for an activity created on a DIFFERENT device (or after
- * a reinstall) — `simplified_path` is a raw PostGIS geometry column and
- * PostgREST cannot serialize it to JSON without a computed/generated
- * GeoJSON column or a read RPC, neither of which exists yet in the current
- * migrations. On the device that actually recorded/finished the activity,
- * the local route is already correct and this gap never surfaces (the
- * design doc's "map always draws from the local simplified path" holds).
- * Follow-up: `db-engineer` adds e.g. `simplified_geojson text generated
- * always as (extensions.st_asgeojson(simplified_path)) stored` (or an
- * equivalent read RPC) so a genuinely different device can pull the route.
+ * Does NOT itself re-hydrate `activity_routes` — that's `pullActivityRoutes`
+ * below, run right after this in `syncEngine.runSync` so a route recorded on
+ * a different device (or before a reinstall) is backfilled using the
+ * `activities` rows this call just wrote locally.
  */
 export async function pullActivities(userId: string): Promise<void> {
   const cursor = (await syncCursorRepository.get(userId, ACTIVITIES_CURSOR_KEY)) ?? '1970-01-01T00:00:00.000Z';
@@ -331,6 +340,74 @@ export async function pullActivities(userId: string): Promise<void> {
     const last = merged[merged.length - 1];
     if (typeof last.updated_at === 'string') {
       await syncCursorRepository.set(userId, ACTIVITIES_CURSOR_KEY, last.updated_at);
+    }
+  }
+}
+
+type ServerActivityRouteRow = {
+  timeline_event_id: string;
+  simplified_path_geojson: { type: string; coordinates: number[][] } | null;
+  raw_track_object_path: string;
+  raw_track_checksum: string | null;
+  raw_point_count: number | null;
+  simplified_point_count: number | null;
+};
+
+/**
+ * Backfills `activity_routes` for any of this user's locally-known GPS
+ * activities that don't yet have a local route row — i.e. an activity
+ * recorded/finished on a DIFFERENT device, or before this device's most
+ * recent reinstall (CORE-02 gate: "persisted and viewable in history" has to
+ * hold across devices, not just on the device that recorded it).
+ *
+ * Reads `simplified_path_geojson` (the generated jsonb column added in
+ * `20260719150000_add_activity_routes_simplified_path_geojson.sql`), never
+ * `simplified_path` itself — the raw PostGIS geometry column returns
+ * unusable EWKB hex over PostgREST. `bounds` has the identical
+ * geometry-over-PostgREST problem and has no generated-GeoJSON counterpart,
+ * so the local bounding box is instead derived client-side from the pulled
+ * GeoJSON via `computeBoundsFromGeoJsonLineString` — cheap, and exactly what
+ * the recording path itself already does with local points.
+ *
+ * Routes are write-once server-side (§9), so this isn't cursor/incremental —
+ * it just finds "GPS activity ids I know about locally that have no local
+ * route row yet" and fetches exactly those, batched to keep each request
+ * bounded. Best-effort per batch: a failed batch is skipped (its ids remain
+ * "missing" and are simply retried on the next sync pass) rather than
+ * aborting the whole pass over one bad batch.
+ */
+export async function pullActivityRoutes(userId: string): Promise<void> {
+  const gpsActivityIds = await activityRepository.getGpsActivityIdsForUser(userId);
+  const missingIds = await activityRoutesRepository.getMissingActivityIds(gpsActivityIds);
+  if (missingIds.length === 0) return;
+
+  for (let i = 0; i < missingIds.length; i += ROUTE_PULL_BATCH_SIZE) {
+    const batch = missingIds.slice(i, i + ROUTE_PULL_BATCH_SIZE);
+    const { data, error } = await supabase
+      .from('activity_routes')
+      .select('timeline_event_id, simplified_path_geojson, raw_track_object_path, raw_track_checksum, raw_point_count, simplified_point_count')
+      .eq('user_id', userId)
+      .in('timeline_event_id', batch);
+
+    // Leave local state untouched on failure (same convention as every other
+    // pull in this file/syncEngine.ts) — this batch's ids simply stay
+    // "missing" and get retried next sync, rather than us silently treating
+    // a network blip as "no route exists."
+    if (error || !data) continue;
+
+    for (const row of data as ServerActivityRouteRow[]) {
+      if (!row.simplified_path_geojson) continue; // shouldn't happen (NOT NULL server-side) but never crash a sync pass on bad/legacy data
+      const simplifiedGeojson = JSON.stringify(row.simplified_path_geojson);
+      const bounds = computeBoundsFromGeoJsonLineString(simplifiedGeojson);
+      await activityRoutesRepository.saveFromServer({
+        activityId: row.timeline_event_id,
+        simplifiedGeojson,
+        boundsJson: bounds ? JSON.stringify(bounds) : null,
+        rawTrackObjectPath: row.raw_track_object_path,
+        rawTrackChecksum: row.raw_track_checksum,
+        rawPointCount: row.raw_point_count,
+        simplifiedPointCount: row.simplified_point_count,
+      });
     }
   }
 }

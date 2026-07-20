@@ -1,8 +1,10 @@
 # `save_activity_v1` / `recompute_prs_for_user_v1` — RPC contract
 
-Status: implemented, **not yet pushed to the live project** (coordinated
-separately — see the task report). Backing migration:
-`supabase/migrations/20260719140000_create_activity_save_and_pr_rpcs.sql`.
+Status: implemented and live. Backing migrations:
+`supabase/migrations/20260719140000_create_activity_save_and_pr_rpcs.sql`, plus
+`supabase/migrations/20260720090000_fix_pr_apply_or_recompute_concurrent_achievement_race.sql`
+(concurrent-save achievement-logging race fix — see §2.6 below and that
+migration's own header for the full before/after reasoning).
 
 Design ref: `docs/architecture/phase-1-module-a.md` §4.3, §5, §6, §7, §9.
 Conventions ref: `api-contract-standards`, `supabase-standards`.
@@ -191,12 +193,33 @@ to the activity's type (`longest_duration` always; `longest_distance` /
 `fastest_avg_pace` if `is_distance_based`; `most_elevation_gain` if also
 `tracks_elevation`) via one indexed point lookup per metric against
 `personal_records` — never a full history scan. A genuine new record updates
-the cache and logs an immutable `activity_achievements` row
-(`ON CONFLICT DO NOTHING` — idempotent under retry). Editing an activity
-that currently holds a record re-derives the true current best via a single
-bounded aggregate scoped to just that `(activity_type_code, metric)` pair
-(§4.3's "one genuinely expensive case") — this correctly demotes the record
-if the edit dropped its value below another activity's.
+the cache (`ON CONFLICT (user_id, activity_type_code, metric) DO UPDATE`) and
+logs an immutable `activity_achievements` row for whoever currently holds the
+record (`ON CONFLICT (timeline_event_id, metric) DO NOTHING` — idempotent
+under retry). Editing an activity that currently holds a record re-derives
+the true current best via a single bounded aggregate scoped to just that
+`(activity_type_code, metric)` pair (§4.3's "one genuinely expensive case")
+— this correctly demotes the record if the edit dropped its value below
+another activity's.
+
+**Concurrent-save achievement logging (fixed in `20260720090000`).** Under
+genuine concurrency — e.g. an offline queue flushing several pending
+activities on reconnect, or multi-device sync — multiple `save_activity_v1`
+calls can race for the same `(activity_type_code, metric)` record. The
+`personal_records` cache always converges to the true final winner (a plain
+`SELECT ... FOR UPDATE`-serialized compare-and-swap). Achievement logging is
+deliberately decoupled from that per-call comparison: it only commits once no
+other `save_activity_v1` call is still queued behind the current one for that
+exact record (detected via `pg_locks`, see the migration's own header for the
+mechanism), and always logs for whichever activity the settled cache
+currently says holds the record — never for a value that was only
+momentarily ahead before a concurrent sibling in the same race superseded it.
+For a normal, uncontended sequential save, this settles on the very first
+check, so the caller's own `achievements` array in the response is
+unaffected — a solo save still reports its own PR immediately. For a genuine
+concurrent batch, only the batch's actual final winner ever gets logged;
+because `activity_achievements` is immutable by design (§4.2), this had to be
+prevented up front rather than corrected after the fact.
 
 ---
 

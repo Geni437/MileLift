@@ -126,7 +126,7 @@ function LogSegment({ userId, unit }: { userId: string | null; unit: 'km' | 'mi'
         loadingMore ? (
           <SkeletonBlock height={60} radius={theme.radius.lg} />
         ) : !hasMore ? (
-          <Text style={[theme.type.caption, styles.endOfList, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+          <Text style={[theme.type.caption, styles.endOfList, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
             That&apos;s the start of your history.
           </Text>
         ) : null

@@ -41,6 +41,25 @@ export const activityAchievementsRepository = {
     return rows.map(toLocal);
   },
 
+  /**
+   * Batched "which of these activities have at least one PR badge" check —
+   * one query for a whole page instead of `getForActivity` called once per
+   * row (the N+1 pattern `useActivityLog`'s PR-badge lookup used to have).
+   * Returns just the ids that have a badge, not the badges themselves, since
+   * that's all the log/history row needs to decide whether to render
+   * `PrBadge`.
+   */
+  async getForActivities(timelineEventIds: string[]): Promise<Set<string>> {
+    if (timelineEventIds.length === 0) return new Set();
+    const db = await getDb();
+    const placeholders = timelineEventIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ timeline_event_id: string }>(
+      `SELECT DISTINCT timeline_event_id FROM activity_achievements WHERE timeline_event_id IN (${placeholders})`,
+      timelineEventIds
+    );
+    return new Set(rows.map((r) => r.timeline_event_id));
+  },
+
   async applyOptimistic(timelineEventId: string, userId: string, evaluations: PrEvaluation[]): Promise<void> {
     if (evaluations.length === 0) return;
     const db = await getDb();

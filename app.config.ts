@@ -148,5 +148,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // (docs/design/screens-phase-0.md §E) materially changes, so historical
     // consent rows stay tied to the disclosure text the user actually saw.
     consentPurposeVersion: '2026-07-19.1',
+    // Build-time-known flag (never the key itself — the key stays out of the
+    // JS bundle/`extra`, same as the comment above requires) so `RouteMap`
+    // can fall back to its local-geometry rendering when no key is
+    // configured, instead of mounting a live `MapView`/`PROVIDER_GOOGLE`
+    // with no key (which renders broken/placeholder tiles on Android rather
+    // than gracefully degrading).
+    googleMapsApiKeyConfigured: !!GOOGLE_MAPS_API_KEY,
   },
 });

@@ -179,6 +179,23 @@ export const activityRepository = {
     return rows.map(toLocal);
   },
 
+  /**
+   * Ids of this user's non-deleted, server-confirmed GPS activities — the
+   * candidate set `activitySync.pullActivityRoutes` checks against the local
+   * `activity_routes` table for a missing route (recorded on a different
+   * device, or before a reinstall). Scoped to `server_confirmed = 1` since
+   * an activity the server has never seen has no server-side route to pull
+   * either.
+   */
+  async getGpsActivityIdsForUser(userId: string): Promise<string[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM activities WHERE user_id = ? AND has_gps_route = 1 AND deleted_at IS NULL AND server_confirmed = 1`,
+      [userId]
+    );
+    return rows.map((r) => r.id);
+  },
+
   async countForUser(userId: string): Promise<number> {
     const db = await getDb();
     const row = await db.getFirstAsync<{ n: number }>(

@@ -45,7 +45,7 @@ export function ActivityRow({ activity, activityType, hasPr, onPress, onRetrySyn
           <Text style={[theme.type.bodyStrong, { color: theme.color.text.primary }]} numberOfLines={1} maxFontSizeMultiplier={1.8}>
             {activity.activityTypeNameSnapshot} · {title}
           </Text>
-          <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+          <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
             {formatRelativeDateTime(activity.occurredAt)}
           </Text>
         </View>
@@ -55,7 +55,7 @@ export function ActivityRow({ activity, activityType, hasPr, onPress, onRetrySyn
       <View style={styles.tagsRow}>
         {hasPr && <PrBadge />}
         {isManual && (
-          <Text style={[theme.type.overline, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.8}>
+          <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
             MANUAL
           </Text>
         )}
