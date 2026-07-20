@@ -98,6 +98,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     'expo-router',
     [
+      'expo-build-properties',
+      {
+        // Health Connect's client library (react-native-health-connect)
+        // requires minSdk 26; Expo's default of 24 fails the Android
+        // manifest merge. 26 (Android 8.0) is well within the app's
+        // realistic device support floor.
+        android: {
+          minSdkVersion: 26,
+        },
+      },
+    ],
+    [
       'expo-splash-screen',
       {
         image: './assets/splash-icon.png',
