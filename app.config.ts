@@ -155,5 +155,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // with no key (which renders broken/placeholder tiles on Android rather
     // than gracefully degrading).
     googleMapsApiKeyConfigured: !!GOOGLE_MAPS_API_KEY,
+    eas: {
+      // EAS project id for @macveren/milelift (created via `eas build` project
+      // setup). This is a public project identifier, not a secret, and only
+      // has meaning paired with the account's own EAS authentication.
+      projectId: '4ad59e81-376d-4925-b341-e07794f011e0',
+    },
   },
 });
