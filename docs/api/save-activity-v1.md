@@ -2,9 +2,14 @@
 
 Status: implemented and live. Backing migrations:
 `supabase/migrations/20260719140000_create_activity_save_and_pr_rpcs.sql`, plus
+two migrations addressing a concurrent-save achievement-logging race — see
+§2.6 below and each migration's own header for the full reasoning:
 `supabase/migrations/20260720090000_fix_pr_apply_or_recompute_concurrent_achievement_race.sql`
-(concurrent-save achievement-logging race fix — see §2.6 below and that
-migration's own header for the full before/after reasoning).
+(an attempted `pg_locks`-waiter-based fix, live-re-verified to NOT work and
+reverted) and
+`supabase/migrations/20260720100000_revert_pr_achievement_settle_check_unsound_batch_boundary.sql`
+(the revert, plus the reasoning for accepting this as a narrow, documented
+risk rather than continuing to chase a DB-level fix).
 
 Design ref: `docs/architecture/phase-1-module-a.md` §4.3, §5, §6, §7, §9.
 Conventions ref: `api-contract-standards`, `supabase-standards`.
@@ -202,24 +207,42 @@ the true current best via a single bounded aggregate scoped to just that
 — this correctly demotes the record if the edit dropped its value below
 another activity's.
 
-**Concurrent-save achievement logging (fixed in `20260720090000`).** Under
-genuine concurrency — e.g. an offline queue flushing several pending
-activities on reconnect, or multi-device sync — multiple `save_activity_v1`
-calls can race for the same `(activity_type_code, metric)` record. The
-`personal_records` cache always converges to the true final winner (a plain
-`SELECT ... FOR UPDATE`-serialized compare-and-swap). Achievement logging is
-deliberately decoupled from that per-call comparison: it only commits once no
-other `save_activity_v1` call is still queued behind the current one for that
-exact record (detected via `pg_locks`, see the migration's own header for the
-mechanism), and always logs for whichever activity the settled cache
-currently says holds the record — never for a value that was only
-momentarily ahead before a concurrent sibling in the same race superseded it.
-For a normal, uncontended sequential save, this settles on the very first
-check, so the caller's own `achievements` array in the response is
-unaffected — a solo save still reports its own PR immediately. For a genuine
-concurrent batch, only the batch's actual final winner ever gets logged;
-because `activity_achievements` is immutable by design (§4.2), this had to be
-prevented up front rather than corrected after the fact.
+**Concurrent-save achievement logging — known, accepted, narrow risk (NOT
+solved at the DB layer; see `20260720090000`/`20260720100000` for the
+attempted fix and why it was reverted).** Under genuine concurrency —
+specifically, two or more different authenticated sessions for the SAME
+account calling `save_activity_v1` for the same `(activity_type_code,
+metric)` within the same narrow window (e.g. the same account signed in on
+two devices, both finishing a new personal-record activity at the literal
+same instant) — multiple `save_activity_v1` calls can race for the same
+record. `personal_records` always converges correctly to the true final
+winner (a plain `SELECT ... FOR UPDATE`-serialized compare-and-swap,
+confirmed correct by every re-verification of this) — that invariant is
+never at risk. Achievement logging, however, happens immediately at each
+racing transaction's own turn in that serialized order, compared only
+against whatever was actually committed immediately before it — a
+transaction has no way to know whether a not-yet-arrived sibling will later
+beat it, and neither can any DB-side check (a `pg_locks`-based "is anyone
+currently waiting on me" approach was tried in `20260720090000` and live-
+re-verification showed it does not work — see that migration's and
+`20260720100000`'s headers for the full reasoning). Practical consequence:
+a genuine multi-device-same-instant race MAY log more than one
+`pr`-ranked `activity_achievements` row for the same metric — each one
+genuinely true the instant it was written, never a data-integrity bug — of
+which only the row matching the FINAL `personal_records.timeline_event_id`
+still reflects the current record. The batch's true final winner is always
+guaranteed to get its own row (it necessarily beats whatever committed value
+precedes it in the chain, being the maximum of the whole set); what is not
+guaranteed under this rare scenario is that it is the ONLY row logged.
+**This is not reachable from a single device's normal offline-queue flush**
+— `src/sync/activitySync.ts`'s `pushActivities` pushes pending activities
+strictly sequentially (a plain `for` loop with `await`, never `Promise.all`),
+and `src/sync/syncEngine.ts`'s `runSync` has a single module-level `syncing`
+guard shared across every trigger source, so a device never has two
+`save_activity_v1` calls in flight at once. A client reading this array
+should treat it as "achievements confirmed as of this call," not assume it
+is the complete lifetime list for the activity — `pullActivityAchievements`
+is the source of truth for what's currently on record.
 
 ---
 

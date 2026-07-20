@@ -26,23 +26,32 @@ first), because later migrations reference objects created by earlier ones
 Order to roll back, if rolling back everything (the save/PR-detection RPC
 layer first, since it's built on top of the Phase 1 Module A tables; those
 tables first, since they're layered on top of the Phase 0 spine):
-1. `20260720090000_fix_pr_apply_or_recompute_concurrent_achievement_race.sql`
-2. `20260719150000_add_activity_routes_simplified_path_geojson.sql`
-3. `20260719140000_create_activity_save_and_pr_rpcs.sql`
-4. `20260719133900_create_activity_tracks_storage_bucket.sql`
-5. `20260719133800_create_kudos.sql`
-6. `20260719133700_create_activity_achievements.sql`
-7. `20260719133600_create_personal_records.sql`
-8. `20260719133500_create_biometric_samples.sql`
-9. `20260719133400_create_wearable_links.sql`
-10. `20260719133300_create_activity_routes.sql`
-11. `20260719133200_create_activity_details.sql`
-12. `20260719133100_create_activity_types.sql`
-13. `20260719133000_enable_postgis.sql`
-14. `20260718210848_create_timeline_events.sql`
-15. `20260718210837_create_profile_health.sql`
-16. `20260718210826_create_user_consents.sql`
-17. `20260718210814_create_profiles.sql`
+1. `20260720100000_revert_pr_achievement_settle_check_unsound_batch_boundary.sql`
+2. `20260720090000_fix_pr_apply_or_recompute_concurrent_achievement_race.sql`
+3. `20260719150000_add_activity_routes_simplified_path_geojson.sql`
+4. `20260719140000_create_activity_save_and_pr_rpcs.sql`
+5. `20260719133900_create_activity_tracks_storage_bucket.sql`
+6. `20260719133800_create_kudos.sql`
+7. `20260719133700_create_activity_achievements.sql`
+8. `20260719133600_create_personal_records.sql`
+9. `20260719133500_create_biometric_samples.sql`
+10. `20260719133400_create_wearable_links.sql`
+11. `20260719133300_create_activity_routes.sql`
+12. `20260719133200_create_activity_details.sql`
+13. `20260719133100_create_activity_types.sql`
+14. `20260719133000_enable_postgis.sql`
+15. `20260718210848_create_timeline_events.sql`
+16. `20260718210837_create_profile_health.sql`
+17. `20260718210826_create_user_consents.sql`
+18. `20260718210814_create_profiles.sql`
+
+Note: `20260720090000`'s own rollback restores the ORIGINAL (pre-fix)
+immediate-logging behavior, which is also what `20260720100000` restores
+going forward (`20260720100000` reverts `20260720090000`'s approach because
+it was confirmed unsound, not because immediate per-transaction logging
+itself was wrong — see `20260720100000`'s migration header). Rolling back
+both `20260720100000` and `20260720090000` in sequence is safe and lands on
+the same function bodies either way.
 
 (The grant/privilege-lockdown correction migrations from 2026-07-19
 [`20260719110557`..`20260719131119`] are additive ACL fixes with no table of
