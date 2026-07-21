@@ -179,6 +179,21 @@ const darkColor = {
     startMarker: palette.growth[500], // start = go/begin (growth = "go")
     finishMarker: palette.ember[500], // finish = the Meridian origin (ember)
   },
+  // Rest timer — the CORE-12 countdown between sets (Phase 2, Module C). A
+  // semantic ALIAS group (NOT a new hue), added for the exact reason color.map
+  // was: the RestTimer component references named state-roles instead of a raw
+  // palette value, and the running/ending/done split is a real meaning worth
+  // naming so a builder never guesses whether "ending" is gold or danger-red.
+  // The timer is the Lift-context's live moment of rested recovery, so it reads
+  // in the trust/telemetry cyan (accent.data), warms to warning-gold in its
+  // final seconds, and resolves to growth on completion. Rationale: tokens.md
+  // §2.2. No new color family (design-reviewer floor).
+  restTimer: {
+    track: palette.graphite[800], // depleting track well (= bg.inset)
+    fill: palette.cyan[500], // running countdown (= accent.data / the Lift/telemetry color)
+    ending: palette.gold[500], // final ~10s (= feedback.warning)
+    done: palette.growth[500], // rest complete (= accent.growth)
+  },
   // Focus ring is intentionally cyan, NOT the ember CTA color, so a focused
   // primary button still shows a visible ring distinct from its own fill.
   focusRing: palette.cyan[400],
@@ -249,6 +264,12 @@ const lightColor: Widen<typeof darkColor> = {
     routeCasing: 'rgba(255,255,255,0.70)', // light casing over light daytime tiles
     startMarker: palette.growth[600],
     finishMarker: palette.ember[600],
+  },
+  restTimer: {
+    track: palette.graphite[50],
+    fill: palette.cyan[600],
+    ending: palette.gold[600],
+    done: palette.growth[600],
   },
   focusRing: palette.cyan[600],
 };

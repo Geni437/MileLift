@@ -105,6 +105,29 @@ no token was added (see screens-phase-1.md §PR surfaces).
 stays inside the brand and the ember route is the one saturated thing on it. This
 is a design decision, not a default map drop-in (see screens-phase-1.md §CORE-02).
 
+### 2.2 `color.restTimer` — rest-timer countdown (added Phase 2, CORE-12)
+The between-sets rest timer (screens-phase-2.md §CORE-12) is one of Module C's
+defining features vs. competitors, so it gets a **first-class, named treatment**
+— but, exactly like `color.map`, it is a **semantic alias group, not a new hue**.
+It exists so the `RestTimer` component references a named *state-role* rather than
+a raw palette value, and so the running/ending/done meanings are decided here once
+(not guessed per build — e.g. whether "ending" is warning-gold or danger-red).
+
+| Token | Value | Meaning |
+| --- | --- | --- |
+| `restTimer.track` | `bg.inset` (graphite) | The depleting countdown track well — a neutral ground, not a brand color. |
+| `restTimer.fill` | `accent.data` (cyan) | The running countdown. Rest is the *recovery* moment inside the Lift context; cyan is the trust/telemetry/recovery color, and it is the Meridian's Lift-axis hue — the timer reads as the Lift axis catching its breath. |
+| `restTimer.ending` | `feedback.warning` (gold) | The final ~10s. Gold = "attention, almost" — never danger-red (nothing is *wrong* about rest ending). |
+| `restTimer.done` | `accent.growth` (green) | Rest complete — the same "go / done / confirmed" meaning growth already carries everywhere. |
+
+**Why this is not overreach.** No new color family is introduced — all four map to
+existing roles (data / warning / growth / inset). It is added, over referencing
+those roles inline, for the identical reason `color.map` was: a defining component
+whose state-to-role mapping is a real design decision worth naming and freezing, so
+`design-reviewer` can see the ending state was *chosen* gold, not defaulted to red.
+The countdown itself carries a non-color signal at every state (the numeric readout
+in the metric face + a text label "Rest" / "Rest done"), never color alone.
+
 ### Meaning-level color rules (so color is never decorative)
 - **Ember is spent, not sprinkled.** It marks the one primary action on a screen
   and activity/energy data. If two things on a screen are ember, one of them is
