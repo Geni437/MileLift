@@ -190,17 +190,42 @@ async function pushProfileHealth(userId: string): Promise<void> {
 async function pushConsents(): Promise<void> {
   const pending = await consentRepository.getUnsynced();
   for (const consent of pending) {
-    const { error } = await supabase.from('user_consents').upsert(
-      {
-        id: consent.id,
-        user_id: consent.userId,
-        category: consent.category,
-        purpose_version: consent.purposeVersion,
-        granted_at: consent.grantedAt,
-        revoked_at: consent.revokedAt,
-      },
-      { onConflict: 'id' }
-    );
+    // Consents are append-only server-side (architecture §6): the ACL only
+    // grants `authenticated` UPDATE on `revoked_at`, never the other
+    // columns, and a blanket upsert's implicit `ON CONFLICT DO UPDATE SET
+    // <every column>` requires UPDATE privilege on all of them to even
+    // plan the statement -- regardless of whether a conflict actually
+    // occurs. So a revoke goes through a scoped `.update(revoked_at)`
+    // (matching consentRepository.revoke's own local write), and a fresh
+    // grant is a plain `.insert()` (id is a client-generated UUID, never
+    // expected to collide) -- never `.upsert()`.
+    if (consent.revokedAt) {
+      const { data, error } = await supabase
+        .from('user_consents')
+        .update({ revoked_at: consent.revokedAt })
+        .eq('id', consent.id)
+        .select('id');
+      if (error) {
+        await consentRepository.markFailed(consent.id, error.message);
+        continue;
+      }
+      if (data && data.length > 0) {
+        await consentRepository.markSynced(consent.id);
+        continue;
+      }
+      // Matched no row: granted and revoked entirely offline before the
+      // grant itself ever synced. Fall through to insert the full
+      // already-revoked row.
+    }
+
+    const { error } = await supabase.from('user_consents').insert({
+      id: consent.id,
+      user_id: consent.userId,
+      category: consent.category,
+      purpose_version: consent.purposeVersion,
+      granted_at: consent.grantedAt,
+      revoked_at: consent.revokedAt,
+    });
 
     if (error) {
       await consentRepository.markFailed(consent.id, error.message);

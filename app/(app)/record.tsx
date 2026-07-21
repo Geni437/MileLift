@@ -246,7 +246,7 @@ export default function RecordScreen() {
             locked={status !== 'ready'}
           />
         </View>
-        {status !== 'ready' && engine.selectedType?.supportsGps && !locationConsentDeclinedOrRevoked && <GpsSignal state={engine.gpsSignal} />}
+        {engine.selectedType?.supportsGps && !locationConsentDeclinedOrRevoked && <GpsSignal state={engine.gpsSignal} />}
       </View>
 
       <View style={styles.content}>
