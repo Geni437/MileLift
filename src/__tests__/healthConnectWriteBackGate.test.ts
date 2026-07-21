@@ -32,7 +32,6 @@ jest.mock('expo-constants', () => ({
         supabaseUrl: 'https://test.supabase.co',
         supabaseAnonKey: 'test-anon-key',
         consentPurposeVersion: 'test-1',
-        googleMapsApiKeyConfigured: false,
       },
     },
   },

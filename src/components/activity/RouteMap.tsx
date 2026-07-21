@@ -1,32 +1,42 @@
 import React, { useMemo, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type LatLng, type Region } from 'react-native-maps';
+import { Camera, GeoJSONSource, Layer, Map as MapLibreMap, Marker, type MapRef } from '@maplibre/maplibre-react-native';
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 
 import { theme } from '../../theme';
-import { env } from '../../lib/env';
 import type { Bounds } from '../../lib/geo';
 
 /**
- * Dark desaturated "graphite" Google Maps style JSON (design doc CORE-02:
- * "dark desaturated graphite tile style, custom style JSON, not the
- * platform default map"). Colors are the app's own graphite/text tokens,
- * not new literals — this is the one place a raw style-JSON array is
- * unavoidable (react-native-maps' `customMapStyle` prop requires literal
- * hex strings per the Google Maps styling spec), but every color plugged in
- * traces back to `theme.color`.
+ * OpenStreetMap raster tiles — free, no API key/account of any kind (unlike
+ * react-native-maps' Google-Maps-SDK dependency on Android, which requires a
+ * key just to initialize the native view regardless of which tiles are
+ * shown). A `background` layer under the raster layer, plus reduced
+ * `raster-opacity`/negative `raster-saturation`, approximates the app's dark
+ * desaturated aesthetic (design doc CORE-02) without a paid/keyed vector
+ * tile provider — a real (documented) visual compromise versus a full custom
+ * vector style, not an oversight.
  */
-const CUSTOM_MAP_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: theme.color.bg.canvas }] },
-  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: theme.color.text.tertiary }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: theme.color.bg.canvas }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: theme.color.border.subtle }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: theme.color.bg.raised }] },
-  { featureType: 'road', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: theme.color.bg.inset }] },
-];
+const MAP_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    osm: {
+      type: 'raster',
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors',
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    { id: 'bg', type: 'background', paint: { 'background-color': theme.color.bg.canvas } },
+    {
+      id: 'osm',
+      type: 'raster',
+      source: 'osm',
+      paint: { 'raster-opacity': 0.85, 'raster-saturation': -0.6, 'raster-brightness-max': 0.85 },
+    },
+  ],
+};
 
 type RoutePoint = { latitude: number; longitude: number };
 
@@ -40,18 +50,11 @@ type Props = {
 };
 
 export function RouteMap({ isOwnActivity, points, bounds, height = 220, tilesUnavailable }: Props) {
-  const mapRef = useRef<MapView | null>(null);
+  const mapRef = useRef<MapRef | null>(null);
 
-  const region = useMemo<Region | undefined>(() => {
+  const cameraBounds = useMemo<[number, number, number, number] | undefined>(() => {
     if (!bounds) return undefined;
-    const latDelta = Math.max(0.003, (bounds.maxLat - bounds.minLat) * 1.3);
-    const lngDelta = Math.max(0.003, (bounds.maxLng - bounds.minLng) * 1.3);
-    return {
-      latitude: (bounds.minLat + bounds.maxLat) / 2,
-      longitude: (bounds.minLng + bounds.maxLng) / 2,
-      latitudeDelta: latDelta,
-      longitudeDelta: lngDelta,
-    };
+    return [bounds.minLng, bounds.minLat, bounds.maxLng, bounds.maxLat];
   }, [bounds]);
 
   if (!isOwnActivity) {
@@ -75,20 +78,13 @@ export function RouteMap({ isOwnActivity, points, bounds, height = 220, tilesUna
 
   // The geometry itself is entirely local (already decoded on-device);
   // only the map TILES require network (design doc CORE-02: "Map tiles fail
-  // / offline" state — the route still draws on a plain surface). Also fall
-  // back here — same rendering, different note — when no Google Maps API
-  // key was configured at build time: mounting a live `MapView` /
-  // `PROVIDER_GOOGLE` with no key renders broken/placeholder tiles on
-  // Android rather than gracefully degrading, and (unlike connectivity)
-  // whether a key exists is known at build time, not something to detect
-  // via a runtime tile-load-error callback.
-  const noMapsKey = !env.googleMapsApiKeyConfigured;
-  if (tilesUnavailable || noMapsKey) {
+  // / offline" state — the route still draws on a plain surface).
+  if (tilesUnavailable) {
     return (
       <View style={[styles.fallback, { height, backgroundColor: theme.color.bg.inset }]}>
         <RouteOnlySvgFallback points={points} height={height} />
         <Text style={[theme.type.caption, styles.offlineNote, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
-          {noMapsKey ? 'Map tiles unavailable — no Maps key configured for this build.' : 'Map tiles unavailable offline.'}
+          Map tiles unavailable offline.
         </Text>
       </View>
     );
@@ -96,32 +92,49 @@ export function RouteMap({ isOwnActivity, points, bounds, height = 220, tilesUna
 
   const start = points[0];
   const finish = points[points.length - 1];
-  const polylineCoords: LatLng[] = points;
+  const routeGeoJson: GeoJSON.Feature = {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'LineString',
+      coordinates: points.map((p) => [p.longitude, p.latitude]),
+    },
+  };
 
   return (
     <View style={[styles.container, { height }]} accessible accessibilityRole="image" accessibilityLabel="Map of the recorded route">
-      <MapView
+      <MapLibreMap
         ref={mapRef}
         style={StyleSheet.absoluteFill}
-        provider={PROVIDER_GOOGLE}
-        customMapStyle={CUSTOM_MAP_STYLE}
-        initialRegion={region}
-        region={region}
-        scrollEnabled
-        zoomEnabled
-        pitchEnabled={false}
-        rotateEnabled={false}
-        toolbarEnabled={false}
+        mapStyle={MAP_STYLE}
+        touchRotate={false}
+        touchPitch={false}
+        attribution
       >
-        <Polyline coordinates={polylineCoords} strokeColor={theme.color.map.routeCasing} strokeWidth={7} />
-        <Polyline coordinates={polylineCoords} strokeColor={theme.color.map.route} strokeWidth={4} />
-        <Marker coordinate={start} anchor={{ x: 0.5, y: 0.5 }} accessibilityLabel="Start">
+        <Camera initialViewState={cameraBounds ? { bounds: cameraBounds, padding: { top: 32, right: 32, bottom: 32, left: 32 } } : undefined} />
+
+        <GeoJSONSource id="route" data={routeGeoJson}>
+          <Layer
+            id="route-casing"
+            type="line"
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-color': theme.color.map.routeCasing, 'line-width': 7 }}
+          />
+          <Layer
+            id="route-line"
+            type="line"
+            layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+            paint={{ 'line-color': theme.color.map.route, 'line-width': 4 }}
+          />
+        </GeoJSONSource>
+
+        <Marker id="start" lngLat={[start.longitude, start.latitude]} anchor="center">
           <View style={[styles.marker, { backgroundColor: theme.color.map.startMarker }]} />
         </Marker>
-        <Marker coordinate={finish} anchor={{ x: 0.5, y: 0.5 }} accessibilityLabel="Finish">
+        <Marker id="finish" lngLat={[finish.longitude, finish.latitude]} anchor="center">
           <View style={[styles.marker, styles.finishMarker, { backgroundColor: theme.color.map.finishMarker }]} />
         </Marker>
-      </MapView>
+      </MapLibreMap>
     </View>
   );
 }

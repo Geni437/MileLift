@@ -27,18 +27,6 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   );
 }
 
-// Phase 1 — Module A (CORE-02 RouteMap). Unlike the Supabase values above,
-// this is NOT safe to commit a real value for (Google Maps Android API keys
-// are typically restricted by package name + SHA-1 fingerprint, but treating
-// it as a real secret is the safer default) — deliberately optional and NOT
-// fail-loud: an unset key means the map tiles won't render on a real device
-// build (the RouteMap component still renders its local-geometry fallback,
-// design doc CORE-02's "Map tiles unavailable offline" treatment covers the
-// same visual gap), not a hard crash. Set it in `.env`/CI secrets before a
-// real device/store build — flagged as a real deploy-time prerequisite, not
-// silently assumed done.
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'MileLift',
@@ -89,7 +77,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // a new consent purpose string and Google Play's background-location
     // prominent-disclosure review process — flagged, not silently assumed.
     permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION', 'CAMERA'],
-    config: GOOGLE_MAPS_API_KEY ? { googleMaps: { apiKey: GOOGLE_MAPS_API_KEY } } : undefined,
   },
   web: {
     favicon: './assets/favicon.png',
@@ -145,9 +132,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // required AndroidManifest intent-filter (permissions-rationale
     // activity) — no config options.
     'react-native-health-connect',
-    // CORE-02 RouteMap. Reads the Android API key from
-    // `android.config.googleMaps.apiKey` above.
-    'react-native-maps',
+    // CORE-02 RouteMap, tiled from OpenStreetMap (no API key/account of any
+    // kind needed, unlike react-native-maps' Google-Maps-SDK dependency on
+    // Android). MapLibre's own location engine ("default") is used rather
+    // than the optional Google Play Services one, keeping the whole map
+    // stack Google-free.
+    '@maplibre/maplibre-react-native',
   ],
   experiments: {
     typedRoutes: true,
@@ -160,13 +150,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // (docs/design/screens-phase-0.md §E) materially changes, so historical
     // consent rows stay tied to the disclosure text the user actually saw.
     consentPurposeVersion: '2026-07-19.1',
-    // Build-time-known flag (never the key itself — the key stays out of the
-    // JS bundle/`extra`, same as the comment above requires) so `RouteMap`
-    // can fall back to its local-geometry rendering when no key is
-    // configured, instead of mounting a live `MapView`/`PROVIDER_GOOGLE`
-    // with no key (which renders broken/placeholder tiles on Android rather
-    // than gracefully degrading).
-    googleMapsApiKeyConfigured: !!GOOGLE_MAPS_API_KEY,
     eas: {
       // EAS project id for @macveren/milelift (created via `eas build` project
       // setup). This is a public project identifier, not a secret, and only
