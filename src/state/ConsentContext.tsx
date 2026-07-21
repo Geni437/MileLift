@@ -39,6 +39,11 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
     health: { consent: null, osStatus: 'not_applicable' },
     location: EMPTY_CATEGORY,
     camera: EMPTY_CATEGORY,
+    // body_image (Phase 2 CORE-16, §12.5): its own dedicated category with no
+    // OS permission surface of its own (the camera sub-step, when the user
+    // chooses "Take photo," is handled separately via the existing `camera`
+    // category) — 'not_applicable' mirrors `health`'s convention.
+    body_image: { consent: null, osStatus: 'not_applicable' },
   });
 
   const refresh = useCallback(async () => {
@@ -47,10 +52,11 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setLoading(true);
-    const [health, location, camera, locationOs, cameraOs] = await Promise.all([
+    const [health, location, camera, bodyImage, locationOs, cameraOs] = await Promise.all([
       consentRepository.getActive(userId, 'health'),
       consentRepository.getActive(userId, 'location'),
       consentRepository.getActive(userId, 'camera'),
+      consentRepository.getActive(userId, 'body_image'),
       locationPermission.getStatus(),
       cameraPermission.getStatus(),
     ]);
@@ -58,6 +64,7 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
       health: { consent: health, osStatus: 'not_applicable' },
       location: { consent: location, osStatus: locationOs },
       camera: { consent: camera, osStatus: cameraOs },
+      body_image: { consent: bodyImage, osStatus: 'not_applicable' },
     });
     setLoading(false);
   }, [userId]);
@@ -73,7 +80,7 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const refreshOsStatus = useCallback(async (category: ConsentCategory) => {
-    if (category === 'health') return; // no native permission surface yet — see healthPermission note below
+    if (category === 'health' || category === 'body_image') return; // neither has a native OS permission of its own (body_image's capture sub-step reuses the `camera` category, not its own OS surface)
     const status = category === 'location' ? await locationPermission.getStatus() : await cameraPermission.getStatus();
     setCategories((prev) => ({ ...prev, [category]: { ...prev[category], osStatus: status } }));
   }, []);

@@ -154,7 +154,8 @@ function mapFedbEquipment(equipment) {
   // movements (77/873 rows, verified: 62 stretching + 8 plyometrics +
   // 6 strength(bodyweight variants) + 1 cardio) — default to bodyweight.
   if (!equipment) return 'bodyweight';
-  return FEDB_EQUIPMENT_MAP[equipment.toLowerCase()] ?? 'other';
+  const mapped = FEDB_EQUIPMENT_MAP[equipment.toLowerCase()];
+  return mapped && EQUIPMENT_TYPE_VALUES.has(mapped) ? mapped : 'other';
 }
 
 async function fetchFreeExerciseDb() {

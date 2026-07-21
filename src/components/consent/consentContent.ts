@@ -50,4 +50,24 @@ export const CONSENT_CONTENT: Record<ConsentCategory, ConsentContent> = {
     footnote: 'You can also add a photo from your library instead. Change camera access anytime in Settings.',
     accentColor: theme.color.accent.growth,
   },
+  // Phase 2 (CORE-16) — copy verbatim from docs/design/screens-phase-2.md
+  // §CORE-16 "The body_image consent priming sheet," approved as designed
+  // (§Decisions item 4). Deliberately styled WITHOUT a bright brand accent —
+  // its icon sits in text.primary on bg.inset with a lock glyph, because
+  // this is a protection, not a feature to sell. `accentColor` here is
+  // `text.primary` (not one of the three feature-accent colors above) so
+  // ConsentSheet's "what MileLift won't do" label renders neutral, per that
+  // design decision — the sheet itself still adds the lock glyph treatment.
+  body_image: {
+    title: 'Save progress photos?',
+    purpose:
+      'Progress photos let you see how your body changes over time — front, side, and back, compared across dates. They live only in your account.',
+    wontDo:
+      'Progress photos are the most private thing in MileLift. They’re stored encrypted, only you can open them, they’re never in any feed and can never be shared or made public — that’s built into the app, not a setting you have to find. We never use them to train anything or send them to anyone.',
+    allowLabel: 'Save progress photos',
+    declineLabel: 'Not now',
+    footnote:
+      'This is separate from health data — you can keep photos off while everything else stays on, or turn photos off later on their own, in Settings › Permissions & data. Turning it off stops new photos; what you’ve saved stays until you delete it.',
+    accentColor: theme.color.text.primary,
+  },
 };

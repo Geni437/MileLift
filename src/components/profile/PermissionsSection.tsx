@@ -21,12 +21,19 @@ const REVOKE_COPY: Record<ConsentCategory, { title: string; body: string }> = {
     title: 'Turn off camera?',
     body: "You can still add progress photos from your library. What you've already saved stays.",
   },
+  // Phase 2 (CORE-16, §6): revoking body_image blocks new progress-photo
+  // writes while health logging keeps working independently (§Decisions 4/5).
+  body_image: {
+    title: 'Turn off progress photos?',
+    body: "New progress photos will stop saving. What you've already saved stays until you delete it.",
+  },
 };
 
 const CATEGORY_LABEL: Record<ConsentCategory, string> = {
   health: 'Health',
   location: 'Location',
   camera: 'Camera',
+  body_image: 'Progress photos',
 };
 
 /** screens-phase-0.md §F.5 — one row per consent category with graceful revoke. */

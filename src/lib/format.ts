@@ -6,10 +6,11 @@
  * stored values"). Every screen renders through these, never a one-off
  * `toFixed` in a component.
  */
-import type { UnitDistanceSnapshot } from '../db/types';
+import type { UnitDistanceSnapshot, UnitWeightSnapshot } from '../db/types';
 
 const METERS_PER_MILE = 1609.344;
 const METERS_PER_KM = 1000;
+const KG_PER_LB = 0.45359237;
 
 export function metersToDisplayDistance(meters: number, unit: UnitDistanceSnapshot): number {
   return unit === 'mi' ? meters / METERS_PER_MILE : meters / METERS_PER_KM;
@@ -97,6 +98,38 @@ function toLocalDateString(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Module C (strength). Canonical storage is always kg (architecture
+// §1's canonical-unit rule); display conversion happens here only, never by
+// mutating the stored value.
+// ---------------------------------------------------------------------------
+
+export function kgToDisplayWeight(kg: number, unit: UnitWeightSnapshot): number {
+  return unit === 'lb' ? kg / KG_PER_LB : kg;
+}
+
+export function displayWeightToKg(value: number, unit: UnitWeightSnapshot): number {
+  return unit === 'lb' ? value * KG_PER_LB : value;
+}
+
+/** "102.5" style weight value in the given display unit, or "--" for no weight (bodyweight-only set). */
+export function formatWeightValue(kg: number | null, unit: UnitWeightSnapshot): string {
+  if (kg == null) return '--';
+  const value = kgToDisplayWeight(kg, unit);
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** Session/exercise volume (reps × weight, summed) — same metric-face convention as weight, rounded to a whole number (volume is a large aggregate, not a precision figure). */
+export function formatVolumeValue(kg: number | null, unit: UnitWeightSnapshot): string {
+  if (kg == null) return '--';
+  return Math.round(kgToDisplayWeight(kg, unit)).toString();
+}
+
+export function formatReps(reps: number | null): string {
+  if (reps == null) return '--';
+  return String(reps);
 }
 
 /** Local week key (Mon-start), used to group activities under a `WeekHeader`. */

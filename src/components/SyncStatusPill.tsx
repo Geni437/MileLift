@@ -13,14 +13,20 @@ type Props = {
 /**
  * SyncStatusPill — visible (never silent) sync-status signal
  * (mobile-architecture-standards). `synced` / `pending` ("Saved · will
- * sync") / `failed` ("Sync failed · retry", tap to retry). Color is never
- * the only signal — each state has distinct text, not just a color swap.
+ * sync") / `failed` ("Sync failed · retry", tap to retry) / `local` ("Saved
+ * on device", Phase 2 CORE-17 addition — a record durable in local SQLite
+ * but not yet enqueued for a sync push at all, e.g. an in-progress workout
+ * before Finish). Color is never the only signal — each state has distinct
+ * text, not just a color swap. `local` is deliberately neutral
+ * (`text.secondary`), neither growth-green (nothing confirmed server-side
+ * yet) nor danger — it reads as reassurance, per the design doc.
  */
 export function SyncStatusPill({ status, onRetry, testID }: Props) {
   const config = {
     synced: { label: 'Synced', fg: theme.color.feedback.success, bg: theme.color.feedback.successTint },
     pending: { label: 'Saved · will sync', fg: theme.color.text.secondary, bg: theme.color.bg.inset },
     failed: { label: 'Sync failed · retry', fg: theme.color.feedback.danger, bg: theme.color.feedback.dangerTint },
+    local: { label: 'Saved on device', fg: theme.color.text.secondary, bg: theme.color.bg.inset },
   }[status];
 
   const content = (

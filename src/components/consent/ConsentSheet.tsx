@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { theme } from '../../theme';
 import { MeridianMark } from '../MeridianMark';
+import { LockGlyph } from '../LockGlyph';
 import { PrimaryButton } from '../PrimaryButton';
 import { SecondaryButton } from '../SecondaryButton';
 import { CONSENT_CONTENT } from './consentContent';
@@ -40,8 +41,8 @@ export function ConsentSheet({ visible, category, loading, onAllow, onDecline }:
             accessibilityViewIsModal
             accessibilityRole="none"
           >
-            <View style={styles.header}>
-              <MeridianMark variant="glyph" size={40} />
+            <View style={[styles.header, category === 'body_image' && { backgroundColor: theme.color.bg.inset, padding: theme.space.sm, borderRadius: theme.radius.md, alignSelf: 'flex-start' }]}>
+              {category === 'body_image' ? <LockGlyph size={28} /> : <MeridianMark variant="glyph" size={40} />}
             </View>
 
             <Text style={[styles.title, { color: theme.color.text.primary }]} maxFontSizeMultiplier={2}>

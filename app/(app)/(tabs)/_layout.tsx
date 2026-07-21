@@ -4,9 +4,11 @@ import { Text } from 'react-native';
 import { theme } from '../../../src/theme';
 
 /**
- * Tab bar. Phase 1 adds the Activity tab (design doc §B: "Tabs become: Home
- * · Activity · Profile — three text labels, no new icon set" — Phase 0's
- * deliberate no-invented-icon-set discipline carries forward).
+ * Tab bar. Phase 1 added Activity; Phase 2 adds Lift (screens-phase-2.md §B:
+ * "Tabs become: Home · Activity · Lift · Profile — four text labels, no new
+ * icon set" — the discipline carries forward again. "Lift" is kept as the
+ * brand's own word rather than renaming "Activity" for symmetry, per that
+ * doc's §Decisions item 2.
  */
 export default function TabsLayout() {
   return (
@@ -34,6 +36,13 @@ export default function TabsLayout() {
         options={{
           title: 'Activity',
           tabBarLabel: ({ color }) => <Text style={{ color, ...theme.type.label }}>Activity</Text>,
+        }}
+      />
+      <Tabs.Screen
+        name="lift"
+        options={{
+          title: 'Lift',
+          tabBarLabel: ({ color }) => <Text style={{ color, ...theme.type.label }}>Lift</Text>,
         }}
       />
       <Tabs.Screen

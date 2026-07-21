@@ -306,4 +306,356 @@ export const SCHEMA_STATEMENTS: string[] = [
     last_sync_error TEXT,
     updated_at TEXT
   );`,
+
+  // ---------------------------------------------------------------------
+  // Phase 2 — Module C (strength training & workout logging). Design ref:
+  // docs/architecture/phase-2-module-c.md §9 ("Local store extension").
+  // Table names mirror the server 1:1 (unlike Module A's merged-table
+  // simplification) per the architecture doc's own naming: "Local schema
+  // gains workout_sessions, workout_set_logs, custom_exercises,
+  // workout_templates(+exercises), programs(+workouts), the three biometric
+  // detail tables, strength_records, and a read-only cached mirror of
+  // exercises/exercise_media." workout_sessions itself still merges spine +
+  // subtype fields (activities' precedent) since there is still no generic
+  // local timeline_events table.
+  // ---------------------------------------------------------------------
+
+  // Read-only cached mirror of the global exercise library (§9.1) — search/
+  // filter/logging all work fully offline against this. Booleans as
+  // INTEGER 0/1; secondary_muscles as a comma-joined text list (SQLite has
+  // no array type) parsed by exercisesRepository.
+  `CREATE TABLE IF NOT EXISTS exercises (
+    id TEXT PRIMARY KEY NOT NULL,
+    slug TEXT NOT NULL,
+    name TEXT NOT NULL,
+    primary_muscle TEXT NOT NULL,
+    secondary_muscles TEXT NOT NULL DEFAULT '',
+    equipment TEXT NOT NULL,
+    mechanic TEXT,
+    force_vector TEXT,
+    is_distance_based INTEGER NOT NULL DEFAULT 0,
+    is_time_based INTEGER NOT NULL DEFAULT 0,
+    is_weighted INTEGER NOT NULL DEFAULT 0,
+    is_bodyweight INTEGER NOT NULL DEFAULT 0,
+    instructions TEXT,
+    source TEXT NOT NULL,
+    attribution TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_exercises_active_muscle ON exercises (is_active, primary_muscle);`,
+  `CREATE INDEX IF NOT EXISTS idx_exercises_active_equipment ON exercises (is_active, equipment);`,
+  `CREATE INDEX IF NOT EXISTS idx_exercises_name ON exercises (name);`,
+
+  `CREATE TABLE IF NOT EXISTS exercise_media (
+    id TEXT PRIMARY KEY NOT NULL,
+    exercise_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    url_or_object_path TEXT NOT NULL,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL,
+    attribution TEXT,
+    license TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_exercise_media_exercise ON exercise_media (exercise_id, sort_order);`,
+
+  `CREATE TABLE IF NOT EXISTS custom_exercises (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    primary_muscle TEXT,
+    equipment TEXT,
+    is_weighted INTEGER NOT NULL DEFAULT 0,
+    is_bodyweight INTEGER NOT NULL DEFAULT 0,
+    is_time_based INTEGER NOT NULL DEFAULT 0,
+    is_distance_based INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    deleted_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_custom_exercises_user ON custom_exercises (user_id) WHERE deleted_at IS NULL;`,
+
+  // Merged spine (timeline_events) + workout_sessions fields, mirroring the
+  // `activities` precedent (schema.ts header). `is_finished = 0` is the
+  // CORE-17 in-progress domain-state case (types.ts LocalWorkoutSession doc
+  // comment) — never included in getUnsynced() until Finish flips it.
+  `CREATE TABLE IF NOT EXISTS workout_sessions (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    title TEXT,
+    notes TEXT,
+    occurred_at TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    event_timezone TEXT NOT NULL,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    source_template_id TEXT,
+    template_name_snapshot TEXT,
+    session_rpe REAL,
+    total_volume_kg REAL,
+    total_sets INTEGER,
+    calories_source TEXT NOT NULL DEFAULT 'none',
+    energy_kcal REAL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    visibility TEXT NOT NULL DEFAULT 'private',
+    load_score REAL,
+    client_created_at TEXT,
+    created_at TEXT,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    is_finished INTEGER NOT NULL DEFAULT 0,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'local',
+    pending_payload TEXT,
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_workout_sessions_user_occurred
+    ON workout_sessions (user_id, occurred_at DESC, id DESC)
+    WHERE deleted_at IS NULL AND is_finished = 1;`,
+
+  `CREATE INDEX IF NOT EXISTS idx_workout_sessions_sync_status ON workout_sessions (sync_status);`,
+
+  `CREATE INDEX IF NOT EXISTS idx_workout_sessions_in_progress
+    ON workout_sessions (user_id, is_finished)
+    WHERE is_finished = 0 AND deleted_at IS NULL;`,
+
+  // The CORE-12 firehose. `dirty`/`server_confirmed` are the per-set
+  // idempotency-grain bookkeeping (§9.2, types.ts doc comment) — a set is
+  // resent in the next save_workout_session_v1 call only while dirty.
+  `CREATE TABLE IF NOT EXISTS workout_set_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    timeline_event_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    exercise_id TEXT,
+    custom_exercise_id TEXT,
+    exercise_name_snapshot TEXT NOT NULL,
+    primary_muscle_snapshot TEXT,
+    exercise_order INTEGER NOT NULL,
+    set_number INTEGER NOT NULL,
+    set_type TEXT NOT NULL DEFAULT 'working',
+    reps INTEGER,
+    weight_kg REAL,
+    unit_weight_snapshot TEXT NOT NULL DEFAULT 'kg',
+    is_bodyweight INTEGER NOT NULL DEFAULT 0,
+    duration_seconds INTEGER,
+    distance_m REAL,
+    rpe REAL,
+    rest_seconds_planned INTEGER,
+    rest_seconds_actual INTEGER,
+    is_completed INTEGER NOT NULL DEFAULT 1,
+    estimated_1rm_kg REAL,
+    notes TEXT,
+    deleted_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    dirty INTEGER NOT NULL DEFAULT 1,
+    server_confirmed INTEGER NOT NULL DEFAULT 0
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_workout_set_logs_session_order
+    ON workout_set_logs (timeline_event_id, exercise_order, set_number);`,
+
+  `CREATE INDEX IF NOT EXISTS idx_workout_set_logs_user_exercise
+    ON workout_set_logs (user_id, exercise_id) WHERE deleted_at IS NULL AND exercise_id IS NOT NULL;`,
+
+  `CREATE INDEX IF NOT EXISTS idx_workout_set_logs_dirty
+    ON workout_set_logs (timeline_event_id) WHERE dirty = 1;`,
+
+  `CREATE TABLE IF NOT EXISTS workout_templates (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    deleted_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_workout_templates_user ON workout_templates (user_id) WHERE deleted_at IS NULL;`,
+
+  `CREATE TABLE IF NOT EXISTS workout_template_exercises (
+    id TEXT PRIMARY KEY NOT NULL,
+    template_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    exercise_id TEXT,
+    custom_exercise_id TEXT,
+    exercise_name_snapshot TEXT NOT NULL,
+    exercise_order INTEGER NOT NULL,
+    target_sets INTEGER,
+    target_reps_low INTEGER,
+    target_reps_high INTEGER,
+    target_weight_kg REAL,
+    target_rest_seconds INTEGER,
+    notes TEXT,
+    deleted_locally INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_workout_template_exercises_template
+    ON workout_template_exercises (template_id, exercise_order);`,
+
+  `CREATE TABLE IF NOT EXISTS programs (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    length_weeks INTEGER,
+    deleted_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_programs_user ON programs (user_id) WHERE deleted_at IS NULL;`,
+
+  `CREATE TABLE IF NOT EXISTS program_workouts (
+    id TEXT PRIMARY KEY NOT NULL,
+    program_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    template_id TEXT NOT NULL,
+    template_name_local TEXT NOT NULL,
+    week_number INTEGER,
+    day_number INTEGER,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_locally INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_program_workouts_program ON program_workouts (program_id, sort_order);`,
+
+  // Cached "current best" per (user, exercise_ref, metric) — mirrors
+  // personal_records (§4.3), used both to render Strength Records and as the
+  // on-device optimistic-PR comparison base at set-completion (CORE-12).
+  // `exercise_ref` is a single NOT NULL synthetic key (exercise_id, or
+  // "custom:<custom_exercise_id>") deliberately used in the PK instead of
+  // the two separate nullable FK columns: SQLite's NULL != NULL semantics in
+  // a unique index means two rows sharing the same NULL custom_exercise_id
+  // would NOT collide on a composite PK containing that column, silently
+  // breaking ON CONFLICT upsert matching — the server works around the
+  // equivalent problem with two partial unique indexes (see
+  // 20260721101400_create_strength_records.sql's own header); this is the
+  // SQLite-side equivalent fix.
+  `CREATE TABLE IF NOT EXISTS strength_records (
+    user_id TEXT NOT NULL,
+    exercise_id TEXT,
+    custom_exercise_id TEXT,
+    exercise_ref TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    value REAL NOT NULL,
+    unit_snapshot TEXT,
+    source_set_log_id TEXT NOT NULL,
+    timeline_event_id TEXT NOT NULL,
+    achieved_at TEXT NOT NULL,
+    previous_value REAL,
+    confirmed INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT,
+    PRIMARY KEY (user_id, exercise_ref, metric)
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS strength_achievements (
+    id TEXT PRIMARY KEY NOT NULL,
+    timeline_event_id TEXT NOT NULL,
+    source_set_log_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    value REAL NOT NULL,
+    is_optimistic INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_strength_achievements_event ON strength_achievements (timeline_event_id);`,
+
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_strength_achievements_set_metric
+    ON strength_achievements (source_set_log_id, metric);`,
+
+  // CORE-16 biometrics. Each is 1:1 spine+detail merged, mirroring
+  // workout_sessions/activities.
+  `CREATE TABLE IF NOT EXISTS bodyweight_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    event_timezone TEXT NOT NULL,
+    weight_kg REAL NOT NULL,
+    unit_weight_snapshot TEXT NOT NULL DEFAULT 'kg',
+    body_fat_pct REAL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    notes TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_bodyweight_logs_user_occurred
+    ON bodyweight_logs (user_id, occurred_at DESC) WHERE deleted_at IS NULL;`,
+
+  `CREATE TABLE IF NOT EXISTS body_measurements (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    event_timezone TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_body_measurements_user_occurred
+    ON body_measurements (user_id, occurred_at DESC) WHERE deleted_at IS NULL;`,
+
+  `CREATE TABLE IF NOT EXISTS body_measurement_values (
+    timeline_event_id TEXT NOT NULL,
+    measurement_kind TEXT NOT NULL,
+    value REAL NOT NULL,
+    unit_snapshot TEXT NOT NULL,
+    PRIMARY KEY (timeline_event_id, measurement_kind)
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS progress_photos (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    event_timezone TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_progress_photos_user_occurred
+    ON progress_photos (user_id, occurred_at DESC) WHERE deleted_at IS NULL;`,
+
+  `CREATE TABLE IF NOT EXISTS progress_photo_images (
+    id TEXT PRIMARY KEY NOT NULL,
+    timeline_event_id TEXT NOT NULL,
+    pose TEXT NOT NULL,
+    local_uri TEXT,
+    object_path TEXT,
+    checksum TEXT,
+    upload_status TEXT NOT NULL DEFAULT 'pending'
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_progress_photo_images_event ON progress_photo_images (timeline_event_id);`,
 ];

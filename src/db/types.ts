@@ -1,4 +1,10 @@
-export type SyncStatus = 'synced' | 'pending' | 'failed';
+/**
+ * `local` — Phase 2 addition (screens-phase-2.md CORE-17): a record that is
+ * durable in local SQLite but has not yet been enqueued for a sync push at
+ * all (an in-progress workout, before Finish). Distinct from `pending`
+ * ("saved and queued to sync") — see workoutSessionsRepository/useWorkoutEngine.
+ */
+export type SyncStatus = 'synced' | 'pending' | 'failed' | 'local';
 
 export type UnitWeight = 'kg' | 'lb';
 export type UnitDistance = 'km' | 'mi';
@@ -29,7 +35,7 @@ export type ProfileWritableFields = Partial<{
   deletionRequestedAt: string | null;
 }>;
 
-export type ConsentCategory = 'health' | 'location' | 'camera';
+export type ConsentCategory = 'health' | 'location' | 'camera' | 'body_image';
 
 export type LocalConsent = {
   id: string;
@@ -226,5 +232,323 @@ export type LocalHealthConnectState = {
   connected: boolean;
   writeBackEnabled: boolean;
   lastSyncedAt: string | null;
+  lastSyncError: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Module C (strength training & workout logging). Design ref:
+// docs/architecture/phase-2-module-c.md, docs/api/save-workout-session-v1.md,
+// docs/design/screens-phase-2.md.
+// ---------------------------------------------------------------------------
+
+export type MuscleGroup =
+  | 'chest' | 'back' | 'lats' | 'traps' | 'shoulders' | 'biceps' | 'triceps' | 'forearms'
+  | 'abs' | 'obliques' | 'quadriceps' | 'hamstrings' | 'glutes' | 'calves'
+  | 'adductors' | 'abductors' | 'neck' | 'full_body' | 'cardio';
+
+export type EquipmentType = 'barbell' | 'dumbbell' | 'machine' | 'cable' | 'bodyweight' | 'kettlebell' | 'band' | 'other';
+export type ExerciseMechanic = 'compound' | 'isolation';
+export type ExerciseForceVector = 'push' | 'pull' | 'static';
+export type SourceDataset = 'free_exercise_db' | 'wger' | 'milelift_authored';
+export type ExerciseMediaType = 'image' | 'animation' | 'video';
+
+/** Read-only local cache of the global `exercises` library (architecture §9.1). */
+export type LocalExercise = {
+  id: string;
+  slug: string;
+  name: string;
+  primaryMuscle: MuscleGroup;
+  secondaryMuscles: MuscleGroup[];
+  equipment: EquipmentType;
+  mechanic: ExerciseMechanic | null;
+  forceVector: ExerciseForceVector | null;
+  isDistanceBased: boolean;
+  isTimeBased: boolean;
+  isWeighted: boolean;
+  isBodyweight: boolean;
+  instructions: string | null;
+  source: SourceDataset;
+  attribution: string | null;
+  isActive: boolean;
+};
+
+export type LocalExerciseMedia = {
+  id: string;
+  exerciseId: string;
+  mediaType: ExerciseMediaType;
+  urlOrObjectPath: string;
+  isPrimary: boolean;
+  source: SourceDataset;
+  attribution: string | null;
+  license: string | null;
+  sortOrder: number;
+};
+
+/** A movement's metadata-driven field set (architecture §1.1/§1.5, design §A "SetRow"). */
+export type ExerciseFieldFlags = {
+  isDistanceBased: boolean;
+  isTimeBased: boolean;
+  isWeighted: boolean;
+  isBodyweight: boolean;
+};
+
+export type LocalCustomExercise = {
+  id: string;
+  userId: string;
+  name: string;
+  primaryMuscle: MuscleGroup | null;
+  equipment: EquipmentType | null;
+  isWeighted: boolean;
+  isBodyweight: boolean;
+  isTimeBased: boolean;
+  isDistanceBased: boolean;
+  notes: string | null;
+  deletedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type WorkoutSetType = 'working' | 'warmup' | 'dropset' | 'failure' | 'amrap';
+export type UnitWeightSnapshot = 'kg' | 'lb';
+
+/** One row of the local `workout_set_logs` mirror — the CORE-12 firehose (architecture §1.5, §9.2). */
+export type LocalWorkoutSet = {
+  id: string;
+  timelineEventId: string;
+  userId: string;
+  exerciseId: string | null;
+  customExerciseId: string | null;
+  exerciseNameSnapshot: string;
+  primaryMuscleSnapshot: MuscleGroup | null;
+  exerciseOrder: number;
+  setNumber: number;
+  setType: WorkoutSetType;
+  reps: number | null;
+  weightKg: number | null;
+  unitWeightSnapshot: UnitWeightSnapshot;
+  isBodyweight: boolean;
+  durationSeconds: number | null;
+  distanceM: number | null;
+  rpe: number | null;
+  restSecondsPlanned: number | null;
+  restSecondsActual: number | null;
+  isCompleted: boolean;
+  estimated1rmKg: number | null;
+  notes: string | null;
+  deletedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  /** Has this row changed locally since it was last confirmed synced (§9.2 per-set idempotency grain). */
+  dirty: boolean;
+  /** Has this exact set `id` ever been included in a successful `save_workout_session_v1` response. */
+  serverConfirmed: boolean;
+};
+
+export type WorkoutSource = 'manual' | 'wearable' | 'import';
+export type WorkoutVisibility = 'private' | 'followers' | 'public';
+
+/**
+ * One row of the local `workout_sessions` mirror — spine (timeline_events)
+ * fields + session fields merged, same simplification `activities` uses for
+ * Module A (schema.ts header) since Module C is the second concrete event
+ * type this client stores, not a generic timeline_events join (Phase 0 §3.2).
+ *
+ * `isFinished = false` is the CORE-17 in-progress domain-state case: the row
+ * exists (durable across an app kill, crash-recovery) but has never been
+ * enqueued for sync — the "local"/"Saved on device" pill state. Finish flips
+ * it to `true` and `syncStatus` to `pending`, which is what actually queues
+ * the push (mirrors `recording_sessions` -> `activities` for Module A, but
+ * folded into one table since sets are built up incrementally through the
+ * session rather than auto-collected).
+ */
+export type LocalWorkoutSession = {
+  id: string;
+  userId: string;
+  title: string | null;
+  notes: string | null;
+  occurredAt: string;
+  localDate: string;
+  eventTimezone: string;
+  durationSeconds: number;
+  sourceTemplateId: string | null;
+  templateNameSnapshot: string | null;
+  sessionRpe: number | null;
+  totalVolumeKg: number | null;
+  totalSets: number | null;
+  caloriesSource: CaloriesSource;
+  energyKcal: number | null;
+  source: WorkoutSource;
+  visibility: WorkoutVisibility;
+  loadScore: number | null;
+  clientCreatedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  deletedAt: string | null;
+  isFinished: boolean;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type LocalWorkoutTemplate = {
+  id: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  deletedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type LocalWorkoutTemplateExercise = {
+  id: string;
+  templateId: string;
+  userId: string;
+  exerciseId: string | null;
+  customExerciseId: string | null;
+  exerciseNameSnapshot: string; // display-only local convenience, not sent to the server (templates have no snapshot server-side, §1.7)
+  exerciseOrder: number;
+  targetSets: number | null;
+  targetRepsLow: number | null;
+  targetRepsHigh: number | null;
+  targetWeightKg: number | null;
+  targetRestSeconds: number | null;
+  notes: string | null;
+  deletedLocally: boolean; // real DELETE server-side (§8), so local removal just needs a "pending delete" marker until pushed
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type LocalProgram = {
+  id: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  lengthWeeks: number | null;
+  deletedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type LocalProgramWorkout = {
+  id: string;
+  programId: string;
+  userId: string;
+  templateId: string;
+  templateNameLocal: string; // display convenience
+  weekNumber: number | null;
+  dayNumber: number | null;
+  sortOrder: number;
+  deletedLocally: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type StrengthPrMetric = 'heaviest_weight' | 'estimated_1rm' | 'best_set_volume' | 'max_reps';
+
+export type LocalStrengthRecord = {
+  userId: string;
+  exerciseId: string | null;
+  customExerciseId: string | null;
+  metric: StrengthPrMetric;
+  value: number;
+  unitSnapshot: string | null;
+  sourceSetLogId: string;
+  timelineEventId: string;
+  achievedAt: string;
+  previousValue: number | null;
+  confirmed: boolean;
+};
+
+export type LocalStrengthAchievement = {
+  id: string;
+  timelineEventId: string;
+  sourceSetLogId: string;
+  userId: string;
+  metric: StrengthPrMetric;
+  value: number;
+  isOptimistic: boolean;
+};
+
+/** 1:1 with a `bodyweight` timeline event (architecture §1.9), health-consent-gated. */
+export type LocalBodyweightLog = {
+  id: string; // = timeline_event_id
+  userId: string;
+  occurredAt: string;
+  localDate: string;
+  eventTimezone: string;
+  weightKg: number;
+  unitWeightSnapshot: UnitWeightSnapshot;
+  bodyFatPct: number | null;
+  source: 'manual' | 'wearable';
+  notes: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  deletedAt: string | null;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type MeasurementKind =
+  | 'waist' | 'chest' | 'hips' | 'thigh' | 'biceps' | 'calf' | 'neck' | 'shoulders' | 'forearm' | 'body_fat_pct';
+export type MeasurementUnitSnapshot = 'cm' | 'in' | 'pct';
+
+export type LocalBodyMeasurementValue = {
+  measurementKind: MeasurementKind;
+  value: number;
+  unitSnapshot: MeasurementUnitSnapshot;
+};
+
+/** 1:1 with a `body_measurement` timeline event + its child site values, health-consent-gated. */
+export type LocalBodyMeasurement = {
+  id: string; // = timeline_event_id
+  userId: string;
+  occurredAt: string;
+  localDate: string;
+  eventTimezone: string;
+  notes: string | null;
+  values: LocalBodyMeasurementValue[];
+  createdAt: string | null;
+  updatedAt: string | null;
+  deletedAt: string | null;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type PhotoPose = 'front' | 'side' | 'back' | 'other';
+export type PhotoUploadStatus = 'pending' | 'uploaded' | 'failed';
+
+export type LocalProgressPhotoImage = {
+  id: string;
+  timelineEventId: string;
+  pose: PhotoPose;
+  localUri: string | null; // on-device file, retained until uploaded (§10 upload-then-metadata)
+  objectPath: string | null; // set once uploaded to the progress-photos bucket
+  checksum: string | null;
+  uploadStatus: PhotoUploadStatus;
+};
+
+/** 1:1 with a `progress_photo` timeline event (one occasion) + its per-pose images, body_image-consent-gated. */
+export type LocalProgressPhoto = {
+  id: string; // = timeline_event_id
+  userId: string;
+  occurredAt: string;
+  localDate: string;
+  eventTimezone: string;
+  notes: string | null;
+  images: LocalProgressPhotoImage[];
+  createdAt: string | null;
+  updatedAt: string | null;
+  deletedAt: string | null;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
   lastSyncError: string | null;
 };

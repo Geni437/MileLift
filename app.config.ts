@@ -138,6 +138,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // than the optional Google Play Services one, keeping the whole map
     // stack Google-free.
     '@maplibre/maplibre-react-native',
+    // CORE-12 rest-timer background notification (Phase 2, Module C) — a
+    // purely local, client-scheduled notification, no push server involved.
+    'expo-notifications',
   ],
   experiments: {
     typedRoutes: true,

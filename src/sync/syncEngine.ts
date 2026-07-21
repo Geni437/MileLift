@@ -14,6 +14,25 @@ import {
   refreshActivityTypesIfNeeded,
 } from './activitySync';
 import { wearableLinksRepository } from '../db/repositories/wearableLinksRepository';
+import {
+  pullBodyMeasurements,
+  pullBodyweightLogs,
+  pullCustomExercises,
+  pullPrograms,
+  pullProgressPhotos,
+  pullStrengthAchievements,
+  pullStrengthRecords,
+  pullWorkoutSessions,
+  pullWorkoutTemplates,
+  pushBodyMeasurements,
+  pushBodyweightLogs,
+  pushCustomExercises,
+  pushPrograms,
+  pushProgressPhotos,
+  pushWorkoutSessions,
+  pushWorkoutTemplates,
+  refreshExerciseLibraryIfStale,
+} from './workoutSync';
 import type { ProfileRow } from '../db/repositories/profileRepository';
 import type { ProfileHealthRow } from '../db/repositories/profileHealthRepository';
 import type { ConsentRow } from '../db/repositories/consentRepository';
@@ -92,6 +111,32 @@ export async function runSync(_reason: 'startup' | 'foreground' | 'reconnect' | 
     await pullActivityRoutes(currentUserId);
     await pullPersonalRecords(currentUserId);
     await pullActivityAchievements(currentUserId);
+
+    // Phase 2 — Module C. Exercise library refreshes on its own cadence
+    // (independent of the user timeline, §9.6); custom exercises/templates/
+    // programs push before workout sessions so a freshly-created custom
+    // exercise or template a session references has already landed
+    // server-side by the time the session's own save runs. Workout sessions
+    // push is the gate-critical, strictly-sequential piece (RPC §2.6) —
+    // pushWorkoutSessions itself loops sequentially, never Promise.all.
+    await refreshExerciseLibraryIfStale();
+    await pushCustomExercises(currentUserId);
+    await pushWorkoutTemplates(currentUserId);
+    await pushPrograms(currentUserId);
+    await pushWorkoutSessions(currentUserId);
+    await pushBodyweightLogs(currentUserId);
+    await pushBodyMeasurements(currentUserId);
+    await pushProgressPhotos(currentUserId);
+
+    await pullCustomExercises(currentUserId);
+    await pullWorkoutTemplates(currentUserId);
+    await pullPrograms(currentUserId);
+    await pullWorkoutSessions(currentUserId);
+    await pullStrengthRecords(currentUserId);
+    await pullStrengthAchievements(currentUserId);
+    await pullBodyweightLogs(currentUserId);
+    await pullBodyMeasurements(currentUserId);
+    await pullProgressPhotos(currentUserId);
   } finally {
     syncing = false;
   }
