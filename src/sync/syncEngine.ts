@@ -83,13 +83,21 @@ export function attachSyncTriggers(): () => void {
 }
 
 export async function runSync(_reason: 'startup' | 'foreground' | 'reconnect' | 'manual' | 'post-write'): Promise<void> {
+  // `syncing` must flip to true synchronously, before any `await` — two
+  // triggers firing close together (e.g. the AppState-active listener and
+  // the network-reconnect listener) would otherwise both pass this guard
+  // while it's still false, and run their entire push chain concurrently,
+  // defeating the single-in-flight guarantee save-workout-session-v1 §2.6
+  // depends on to keep its PR-detection race narrow/cross-device-only
+  // (live-reproduced: this exact race let two same-device syncs double-log
+  // a PR achievement for one workout).
   if (!currentUserId || syncing) return;
-
-  const net = await Network.getNetworkStateAsync();
-  if (!net.isConnected || net.isInternetReachable === false) return;
-
   syncing = true;
+
   try {
+    const net = await Network.getNetworkStateAsync();
+    if (!net.isConnected || net.isInternetReachable === false) return;
+
     await pushProfile(currentUserId);
     await pushProfileHealth(currentUserId);
     await pushConsents();

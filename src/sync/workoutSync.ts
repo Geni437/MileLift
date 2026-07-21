@@ -151,17 +151,21 @@ async function pushWorkoutSave(session: LocalWorkoutSession): Promise<void> {
     return;
   }
 
-  await workoutSessionsRepository.markFinishedSynced(session.id, {
-    durationSeconds: result.duration_seconds,
-    totalVolumeKg: result.total_volume_kg,
-    totalSets: result.total_sets,
-    loadScore: result.load_score,
-    energyKcal: result.energy_kcal,
-  });
-  // Exactly the sets included in THIS call are now confirmed — any set
-  // dirtied again after this point (a later edit) is still resent on the
-  // next call, per the per-set idempotency grain (§9.2).
-  await workoutSessionsRepository.markSetsSynced(dirtySets.map((s) => s.id));
+  // The session and exactly the sets included in THIS call are flipped to
+  // synced together, atomically — any set dirtied again after this point (a
+  // later edit) is still resent on the next call, per the per-set
+  // idempotency grain (§9.2).
+  await workoutSessionsRepository.markFinishedAndSetsSynced(
+    session.id,
+    {
+      durationSeconds: result.duration_seconds,
+      totalVolumeKg: result.total_volume_kg,
+      totalSets: result.total_sets,
+      loadScore: result.load_score,
+      energyKcal: result.energy_kcal,
+    },
+    dirtySets.map((s) => s.id)
+  );
 
   await reconcileStrengthPrs(session, result.achievements ?? []);
 }

@@ -347,16 +347,34 @@ export const workoutSessionsRepository = {
     return row?.n ?? 0;
   },
 
-  async markFinishedSynced(id: string, server: { durationSeconds: number; totalVolumeKg: number | null; totalSets: number | null; loadScore: number | null; energyKcal: number | null }): Promise<void> {
+  /**
+   * Flips the session AND the just-pushed sets to synced in one transaction.
+   * These must never land as two separate writes: if the app were killed
+   * between them, the session would already read `sync_status = 'synced'`
+   * (so `getUnsynced` would never revisit it) while its sets stayed
+   * `dirty = 1, server_confirmed = 0` forever — permanently stranded, and
+   * `removeSet` would later hard-delete rather than tombstone one of them
+   * (it checks `server_confirmed`), silently failing to propagate a delete.
+   */
+  async markFinishedAndSetsSynced(
+    id: string,
+    server: { durationSeconds: number; totalVolumeKg: number | null; totalSets: number | null; loadScore: number | null; energyKcal: number | null },
+    setIds: string[]
+  ): Promise<void> {
     const db = await getDb();
     const now = new Date().toISOString();
-    await db.runAsync(
-      `UPDATE workout_sessions SET
-         duration_seconds = ?, total_volume_kg = ?, total_sets = ?, load_score = ?, energy_kcal = ?,
-         created_at = COALESCE(created_at, ?), updated_at = ?, server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL
-       WHERE id = ?`,
-      [server.durationSeconds, server.totalVolumeKg, server.totalSets, server.loadScore, server.energyKcal, now, now, id]
-    );
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        `UPDATE workout_sessions SET
+           duration_seconds = ?, total_volume_kg = ?, total_sets = ?, load_score = ?, energy_kcal = ?,
+           created_at = COALESCE(created_at, ?), updated_at = ?, server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL
+         WHERE id = ?`,
+        [server.durationSeconds, server.totalVolumeKg, server.totalSets, server.loadScore, server.energyKcal, now, now, id]
+      );
+      for (const setId of setIds) {
+        await db.runAsync(`UPDATE workout_set_logs SET dirty = 0, server_confirmed = 1 WHERE id = ?`, [setId]);
+      }
+    });
   },
 
   async markDeleteSynced(id: string): Promise<void> {
@@ -510,16 +528,6 @@ export const workoutSessionsRepository = {
       [timelineEventId]
     );
     return rows.map(toLocalSet);
-  },
-
-  async markSetsSynced(ids: string[]): Promise<void> {
-    if (ids.length === 0) return;
-    const db = await getDb();
-    await db.withTransactionAsync(async () => {
-      for (const id of ids) {
-        await db.runAsync(`UPDATE workout_set_logs SET dirty = 0, server_confirmed = 1 WHERE id = ?`, [id]);
-      }
-    });
   },
 
   /** Bulk pull reconciliation for a session's sets (own read, own edits win per row per §3.5 — a locally dirty set is left untouched). */
