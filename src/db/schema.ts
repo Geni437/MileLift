@@ -76,6 +76,11 @@ export const SCHEMA_STATEMENTS: string[] = [
     training_balance_run INTEGER NOT NULL DEFAULT 50,
     onboarding_completed_at TEXT,
     recording_hero_metric TEXT NOT NULL DEFAULT 'duration',
+    -- Per-device "Always reveal" opt-out for progress-photo tiles (design doc
+    -- CORE-16) — device-local only, same rationale as the rest of this table
+    -- (no server column for this exists; a glance-in-the-gym privacy default
+    -- is a device setting, not an account-wide synced preference).
+    photos_always_reveal INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   );`,
 
@@ -375,6 +380,12 @@ export const SCHEMA_STATEMENTS: string[] = [
     deleted_at TEXT,
     created_at TEXT,
     updated_at TEXT,
+    -- Has this row's id ever been confirmed by a successful server INSERT?
+    -- Distinguishes "first create — plain INSERT" from "edit — column-scoped
+    -- UPDATE only" so the push side never falls back to a whole-row upsert
+    -- against a table whose grant is narrower than the payload (the
+    -- user_consents-class bug — see src/sync/workoutSync.ts's module doc).
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'pending',
     last_sync_error TEXT
   );`,
@@ -475,6 +486,8 @@ export const SCHEMA_STATEMENTS: string[] = [
     deleted_at TEXT,
     created_at TEXT,
     updated_at TEXT,
+    -- See custom_exercises.server_confirmed doc comment above.
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'pending',
     last_sync_error TEXT
   );`,
@@ -496,6 +509,11 @@ export const SCHEMA_STATEMENTS: string[] = [
     target_rest_seconds INTEGER,
     notes TEXT,
     deleted_locally INTEGER NOT NULL DEFAULT 0,
+    -- See custom_exercises.server_confirmed doc comment above. Especially
+    -- important here: exercise_id/custom_exercise_id are excluded from this
+    -- table's UPDATE grant (§8.1 — "modeled as delete + re-insert"), so an
+    -- edit push must never re-send them inside an upsert's SET clause.
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'pending',
     last_sync_error TEXT
   );`,
@@ -512,6 +530,8 @@ export const SCHEMA_STATEMENTS: string[] = [
     deleted_at TEXT,
     created_at TEXT,
     updated_at TEXT,
+    -- See custom_exercises.server_confirmed doc comment above.
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'pending',
     last_sync_error TEXT
   );`,
@@ -528,6 +548,9 @@ export const SCHEMA_STATEMENTS: string[] = [
     day_number INTEGER,
     sort_order INTEGER NOT NULL DEFAULT 0,
     deleted_locally INTEGER NOT NULL DEFAULT 0,
+    -- See workout_template_exercises.server_confirmed doc comment above —
+    -- template_id is likewise excluded from this table's UPDATE grant.
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'pending',
     last_sync_error TEXT
   );`,

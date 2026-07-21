@@ -135,9 +135,13 @@ export default function TemplateBuilderScreen() {
                 <TextButton label="Remove" danger onPress={() => void handleRemoveExercise(ex.id)} />
               </View>
             </View>
-            <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
-              {ex.targetSets ?? '–'} sets · {ex.targetRepsLow ?? '–'}–{ex.targetRepsHigh ?? '–'} reps · {ex.targetRestSeconds ?? '–'}s rest
-            </Text>
+            {/* Metric-face dual readout (design doc §B) — not one plain caption
+                string; mirrors the SaveSheet SummaryStat pattern. */}
+            <View style={styles.targetRow}>
+              <TargetStat value={ex.targetSets != null ? String(ex.targetSets) : '–'} label="Sets" />
+              <TargetStat value={`${ex.targetRepsLow ?? '–'}–${ex.targetRepsHigh ?? '–'}`} label="Reps" />
+              <TargetStat value={ex.targetRestSeconds != null ? `${ex.targetRestSeconds}s` : '–'} label="Rest" />
+            </View>
           </View>
         ))}
         <TextButton label="＋ Add exercise" onPress={handleAddExercise} />
@@ -165,6 +169,19 @@ export default function TemplateBuilderScreen() {
   );
 }
 
+function TargetStat({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.targetStat}>
+      <Text style={[theme.type.metricSm, theme.fontVariation.metric, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.6}>
+        {value}
+      </Text>
+      <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
+        {label.toUpperCase()}
+      </Text>
+    </View>
+  );
+}
+
 function toFields(ex: LocalWorkoutTemplateExercise): TemplateExerciseFields {
   return {
     exerciseId: ex.exerciseId,
@@ -187,4 +204,6 @@ const styles = StyleSheet.create({
   exerciseRow: { borderWidth: theme.border.hairline, borderRadius: theme.radius.md, padding: theme.space.sm, gap: theme.space.xxs },
   exerciseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   exerciseActions: { flexDirection: 'row' },
+  targetRow: { flexDirection: 'row', gap: theme.space.md },
+  targetStat: { gap: 2 },
 });

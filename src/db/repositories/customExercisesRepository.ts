@@ -15,6 +15,7 @@ type Row = {
   deleted_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  server_confirmed: number;
   sync_status: string;
   last_sync_error: string | null;
 };
@@ -34,6 +35,7 @@ function toLocal(row: Row): LocalCustomExercise {
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    serverConfirmed: !!row.server_confirmed,
     syncStatus: row.sync_status as SyncStatus,
     lastSyncError: row.last_sync_error,
   };
@@ -71,8 +73,8 @@ export const customExercisesRepository = {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.runAsync(
-      `INSERT INTO custom_exercises (id, user_id, name, primary_muscle, equipment, is_weighted, is_bodyweight, is_time_based, is_distance_based, notes, created_at, updated_at, sync_status, last_sync_error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL)`,
+      `INSERT INTO custom_exercises (id, user_id, name, primary_muscle, equipment, is_weighted, is_bodyweight, is_time_based, is_distance_based, notes, created_at, updated_at, server_confirmed, sync_status, last_sync_error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', NULL)`,
       [
         id,
         userId,
@@ -102,12 +104,25 @@ export const customExercisesRepository = {
 
   async markSynced(id: string): Promise<void> {
     const db = await getDb();
-    await db.runAsync(`UPDATE custom_exercises SET sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
+    await db.runAsync(`UPDATE custom_exercises SET server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
   },
 
   async markFailed(id: string, message: string): Promise<void> {
     const db = await getDb();
     await db.runAsync(`UPDATE custom_exercises SET sync_status = 'failed', last_sync_error = ? WHERE id = ?`, [message, id]);
+  },
+
+  /** Has this row's id ever been confirmed by a successful server INSERT — first-create (plain INSERT) vs. edit (column-scoped UPDATE only) for the push side. */
+  async wasServerConfirmed(id: string): Promise<boolean> {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ server_confirmed: number }>('SELECT server_confirmed FROM custom_exercises WHERE id = ?', [id]);
+    return !!row?.server_confirmed;
+  },
+
+  /** Soft-deleted entirely offline before ever syncing — the server never saw it, so there is nothing to push; just remove it locally. */
+  async purgeLocalOnly(id: string): Promise<void> {
+    const db = await getDb();
+    await db.runAsync('DELETE FROM custom_exercises WHERE id = ? AND server_confirmed = 0', [id]);
   },
 
   async getUnsynced(userId: string): Promise<LocalCustomExercise[]> {
@@ -126,14 +141,14 @@ export const customExercisesRepository = {
         const existing = await db.getFirstAsync<Row>('SELECT * FROM custom_exercises WHERE id = ?', [row.id]);
         if (existing && existing.sync_status !== 'synced') continue;
         await db.runAsync(
-          `INSERT INTO custom_exercises (id, user_id, name, primary_muscle, equipment, is_weighted, is_bodyweight, is_time_based, is_distance_based, notes, deleted_at, created_at, updated_at, sync_status, last_sync_error)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', NULL)
+          `INSERT INTO custom_exercises (id, user_id, name, primary_muscle, equipment, is_weighted, is_bodyweight, is_time_based, is_distance_based, notes, deleted_at, created_at, updated_at, server_confirmed, sync_status, last_sync_error)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'synced', NULL)
            ON CONFLICT(id) DO UPDATE SET
              name = excluded.name, primary_muscle = excluded.primary_muscle, equipment = excluded.equipment,
              is_weighted = excluded.is_weighted, is_bodyweight = excluded.is_bodyweight,
              is_time_based = excluded.is_time_based, is_distance_based = excluded.is_distance_based,
              notes = excluded.notes, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at,
-             sync_status = 'synced', last_sync_error = NULL`,
+             server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL`,
           [
             row.id,
             row.user_id,

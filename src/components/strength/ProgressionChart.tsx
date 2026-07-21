@@ -46,10 +46,12 @@ export function ProgressionChart({ points, height = 140 }: Props) {
         ))}
       </View>
       <View style={styles.labelsRow}>
-        <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.6}>
+        {/* text.tertiary never clears AA at normal caption size (tokens.md "Contrast") — text.secondary. */}
+        <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.6}>
           {points[0]!.label}
         </Text>
-        <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.6}>
+        {/* text.tertiary never clears AA at normal caption size (tokens.md "Contrast") — text.secondary. */}
+        <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.6}>
           {points[points.length - 1]!.label}
         </Text>
       </View>

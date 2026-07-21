@@ -74,6 +74,29 @@ export function exerciseFieldFlags(e: Pick<LocalExercise, 'isDistanceBased' | 'i
 
 const LIBRARY_PAGE_SIZE = 60;
 
+// PostgREST's `max_rows` (supabase/config.toml) silently caps any unranged
+// select at 1000 rows with a normal 200 — this must stay comfortably under
+// that ceiling regardless of catalog growth.
+const REFRESH_PAGE_SIZE = 500;
+
+/** Walks a table with `.range()` until a page comes back shorter than `REFRESH_PAGE_SIZE`. Returns `null` on any page's error (caller keeps the previous local cache rather than partially overwriting it). */
+async function fetchAllPages<T>(table: 'exercises' | 'exercise_media'): Promise<T[] | null> {
+  const rows: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('id', { ascending: true })
+      .range(offset, offset + REFRESH_PAGE_SIZE - 1);
+    if (error || !data) return null;
+    rows.push(...(data as T[]));
+    if (data.length < REFRESH_PAGE_SIZE) break;
+    offset += REFRESH_PAGE_SIZE;
+  }
+  return rows;
+}
+
 /**
  * Read-only local cache of the global `exercises`/`exercise_media` library
  * (architecture §9.1, §9.6) — CORE-13 browse/search/filter and CORE-12
@@ -169,16 +192,26 @@ export const exercisesRepository = {
     return (row?.n ?? 0) > 0;
   },
 
-  /** Full-refresh pull of the library (§9.6: independent cadence from the user timeline; small-enough dataset per architecture §12 item 2 that a full refresh, not incremental, is acceptable). */
+  /**
+   * Full-refresh pull of the library (§9.6: independent cadence from the
+   * user timeline; small-enough dataset per architecture §12 item 2 that a
+   * full refresh, not incremental, is acceptable).
+   *
+   * PostgREST caps an unranged `select` at `max_rows` (supabase/config.toml
+   * — 1000) and returns a normal 200 with a silently-truncated page, no
+   * error. With 1,699 catalog exercises that silently dropped ~40% of every
+   * device's local cache. Paginated with `.range()` until a page comes back
+   * shorter than `PAGE_SIZE`, ordered by the primary key for a stable walk.
+   */
   async refreshFromServer(): Promise<void> {
-    const { data: exercises, error: exercisesError } = await supabase.from('exercises').select('*');
-    if (exercisesError || !exercises) return;
-    const { data: media, error: mediaError } = await supabase.from('exercise_media').select('*');
-    if (mediaError) return; // keep exercises fresh even if media fails; never worse than the previous cache
+    const exercises = await fetchAllPages<ExerciseRow>('exercises');
+    if (exercises === null) return;
+    const media = await fetchAllPages<MediaRow>('exercise_media');
+    // media === null: keep exercises fresh even if media fails; never worse than the previous cache.
 
     const db = await getDb();
     await db.withTransactionAsync(async () => {
-      for (const row of exercises as ExerciseRow[]) {
+      for (const row of exercises) {
         await db.runAsync(
           `INSERT INTO exercises (
              id, slug, name, primary_muscle, secondary_muscles, equipment, mechanic, force_vector,
@@ -216,7 +249,7 @@ export const exercisesRepository = {
       }
 
       if (media) {
-        for (const row of media as MediaRow[]) {
+        for (const row of media) {
           await db.runAsync(
             `INSERT INTO exercise_media (id, exercise_id, media_type, url_or_object_path, is_primary, source, attribution, license, sort_order)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

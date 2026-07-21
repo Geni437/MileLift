@@ -1,3 +1,5 @@
+import * as SQLite from 'expo-sqlite';
+
 import { getDb } from '../client';
 import type {
   CaloriesSource,
@@ -190,6 +192,32 @@ export type ServerWorkoutSessionRow = {
   updated_at: string;
   deleted_at: string | null;
 };
+
+/** Shared write body for a single set upsert — factored out so `upsertSetsBatch` can run several of these inside one `withTransactionAsync`, not just `upsertSet`'s single-statement case. */
+async function runUpsertSet(db: SQLite.SQLiteDatabase, id: string, timelineEventId: string, userId: string, fields: SetWriteFields): Promise<void> {
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO workout_set_logs (
+       id, timeline_event_id, user_id, exercise_id, custom_exercise_id, exercise_name_snapshot, primary_muscle_snapshot,
+       exercise_order, set_number, set_type, reps, weight_kg, unit_weight_snapshot, is_bodyweight,
+       duration_seconds, distance_m, rpe, rest_seconds_planned, rest_seconds_actual, is_completed,
+       estimated_1rm_kg, notes, created_at, updated_at, dirty, server_confirmed
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+     ON CONFLICT(id) DO UPDATE SET
+       exercise_order = excluded.exercise_order, set_number = excluded.set_number, set_type = excluded.set_type,
+       reps = excluded.reps, weight_kg = excluded.weight_kg, unit_weight_snapshot = excluded.unit_weight_snapshot,
+       is_bodyweight = excluded.is_bodyweight, duration_seconds = excluded.duration_seconds, distance_m = excluded.distance_m,
+       rpe = excluded.rpe, rest_seconds_planned = excluded.rest_seconds_planned, rest_seconds_actual = excluded.rest_seconds_actual,
+       is_completed = excluded.is_completed, estimated_1rm_kg = excluded.estimated_1rm_kg, notes = excluded.notes,
+       updated_at = excluded.updated_at, dirty = 1`,
+    [
+      id, timelineEventId, userId, fields.exerciseId, fields.customExerciseId, fields.exerciseNameSnapshot, fields.primaryMuscleSnapshot,
+      fields.exerciseOrder, fields.setNumber, fields.setType, fields.reps, fields.weightKg, fields.unitWeightSnapshot, fields.isBodyweight ? 1 : 0,
+      fields.durationSeconds, fields.distanceM, fields.rpe, fields.restSecondsPlanned, fields.restSecondsActual, fields.isCompleted ? 1 : 0,
+      fields.estimated1rmKg, fields.notes, now, now,
+    ]
+  );
+}
 
 const PAGE_SIZE = 20;
 
@@ -443,6 +471,32 @@ export const workoutSessionsRepository = {
   },
 
   /**
+   * Batch fetch of completed working-set volumes for several sessions at
+   * once — the `LiftStack:static` history-row micro-thumbnail's data source
+   * (design doc §B "WorkoutRow"), mirroring `ActivityRow`'s own
+   * `MeridianTrace:static` precedent from Module A. One query for a whole
+   * page of history rows rather than N+1 per-row `getSetsForSession` calls.
+   */
+  async getWorkingSetVolumesForSessions(timelineEventIds: string[]): Promise<Map<string, { id: string; volume: number }[]>> {
+    const map = new Map<string, { id: string; volume: number }[]>();
+    if (timelineEventIds.length === 0) return map;
+    const db = await getDb();
+    const placeholders = timelineEventIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ id: string; timeline_event_id: string; reps: number | null; weight_kg: number | null; is_bodyweight: number }>(
+      `SELECT id, timeline_event_id, reps, weight_kg, is_bodyweight FROM workout_set_logs
+       WHERE timeline_event_id IN (${placeholders}) AND deleted_at IS NULL AND is_completed = 1 AND set_type = 'working'
+       ORDER BY timeline_event_id, exercise_order ASC, set_number ASC`,
+      timelineEventIds
+    );
+    for (const row of rows) {
+      const list = map.get(row.timeline_event_id) ?? [];
+      list.push({ id: row.id, volume: (row.reps ?? 0) * (row.weight_kg ?? (row.is_bodyweight ? 1 : 0)) });
+      map.set(row.timeline_event_id, list);
+    }
+    return map;
+  },
+
+  /**
    * The most recent OTHER finished session's working sets for this exact
    * exercise — the CORE-12 "prev" reference column (design doc §A SetRow: "a
    * major logging-speed aid"). Returns just that one prior session's sets,
@@ -477,29 +531,24 @@ export const workoutSessionsRepository = {
   /** Upsert a set (new or edited) — always marks `dirty = 1` (§9.2 per-set idempotency grain: resent until confirmed). */
   async upsertSet(id: string, timelineEventId: string, userId: string, fields: SetWriteFields): Promise<LocalWorkoutSet> {
     const db = await getDb();
-    const now = new Date().toISOString();
-    await db.runAsync(
-      `INSERT INTO workout_set_logs (
-         id, timeline_event_id, user_id, exercise_id, custom_exercise_id, exercise_name_snapshot, primary_muscle_snapshot,
-         exercise_order, set_number, set_type, reps, weight_kg, unit_weight_snapshot, is_bodyweight,
-         duration_seconds, distance_m, rpe, rest_seconds_planned, rest_seconds_actual, is_completed,
-         estimated_1rm_kg, notes, created_at, updated_at, dirty, server_confirmed
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
-       ON CONFLICT(id) DO UPDATE SET
-         exercise_order = excluded.exercise_order, set_number = excluded.set_number, set_type = excluded.set_type,
-         reps = excluded.reps, weight_kg = excluded.weight_kg, unit_weight_snapshot = excluded.unit_weight_snapshot,
-         is_bodyweight = excluded.is_bodyweight, duration_seconds = excluded.duration_seconds, distance_m = excluded.distance_m,
-         rpe = excluded.rpe, rest_seconds_planned = excluded.rest_seconds_planned, rest_seconds_actual = excluded.rest_seconds_actual,
-         is_completed = excluded.is_completed, estimated_1rm_kg = excluded.estimated_1rm_kg, notes = excluded.notes,
-         updated_at = excluded.updated_at, dirty = 1`,
-      [
-        id, timelineEventId, userId, fields.exerciseId, fields.customExerciseId, fields.exerciseNameSnapshot, fields.primaryMuscleSnapshot,
-        fields.exerciseOrder, fields.setNumber, fields.setType, fields.reps, fields.weightKg, fields.unitWeightSnapshot, fields.isBodyweight ? 1 : 0,
-        fields.durationSeconds, fields.distanceM, fields.rpe, fields.restSecondsPlanned, fields.restSecondsActual, fields.isCompleted ? 1 : 0,
-        fields.estimated1rmKg, fields.notes, now, now,
-      ]
-    );
+    await runUpsertSet(db, id, timelineEventId, userId, fields);
     return (await this.getSet(id))!;
+  },
+
+  /**
+   * Writes several sets' upserts inside ONE transaction — used by
+   * `useWorkoutEngine.moveExercise`'s exercise_order swap across two blocks
+   * so an app kill between the two blocks' writes can never leave them
+   * sharing the same `exercise_order` (mirrors `markFinishedAndSetsSynced`/
+   * `discardInProgress`'s use of `withTransactionAsync` elsewhere in this file).
+   */
+  async upsertSetsBatch(timelineEventId: string, userId: string, sets: { id: string; fields: SetWriteFields }[]): Promise<void> {
+    const db = await getDb();
+    await db.withTransactionAsync(async () => {
+      for (const { id, fields } of sets) {
+        await runUpsertSet(db, id, timelineEventId, userId, fields);
+      }
+    });
   },
 
   /**

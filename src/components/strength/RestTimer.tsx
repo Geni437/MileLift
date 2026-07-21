@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 
 import { theme } from '../../theme';
 import { formatDuration } from '../../lib/format';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { REST_ADJUST_SECONDS } from '../../features/strength/useWorkoutEngine';
 import type { RestTimerState } from '../../features/strength/useWorkoutEngine';
 
@@ -40,9 +42,7 @@ export function RestTimer({ state, onAdjust, onSkip, onDismiss }: Props) {
 
       <View style={styles.row}>
         <View style={styles.readout}>
-          <Text style={[theme.type.metricLg, theme.fontVariation.metric, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.6}>
-            {formatDuration(state.remainingSeconds)}
-          </Text>
+          <PulsingReadout ending={state.ending && !state.done}>{formatDuration(state.remainingSeconds)}</PulsingReadout>
           <Text style={[theme.type.label, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
             {label}
           </Text>
@@ -59,6 +59,37 @@ export function RestTimer({ state, onAdjust, onSkip, onDismiss }: Props) {
         )}
       </View>
     </View>
+  );
+}
+
+/**
+ * The final ~10s numeric readout (design doc §CORE-12 "Rest timer": "the
+ * number pulses; reduced motion: no pulse, color + label change only"). The
+ * color/label change (`restTimer.ending` gold + the `ending` state driving
+ * the track fill above) already happens unconditionally; ONLY the animated
+ * pulse itself is reduced-motion-gated here.
+ */
+function PulsingReadout({ ending, children }: { ending: boolean; children: React.ReactNode }) {
+  const reducedMotion = useReducedMotion();
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (ending && !reducedMotion) {
+      pulse.value = withRepeat(withSequence(withTiming(1.08, { duration: theme.duration.base, easing: Easing.out(Easing.cubic) }), withTiming(1, { duration: theme.duration.base, easing: Easing.in(Easing.cubic) })), -1, false);
+    } else {
+      pulse.value = withTiming(1, { duration: theme.duration.fast });
+    }
+  }, [ending, reducedMotion, pulse]);
+
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulse.value }] }));
+
+  return (
+    <Animated.Text
+      style={[theme.type.metricLg, theme.fontVariation.metric, { color: theme.color.text.primary }, animatedStyle]}
+      maxFontSizeMultiplier={1.6}
+    >
+      {children}
+    </Animated.Text>
   );
 }
 

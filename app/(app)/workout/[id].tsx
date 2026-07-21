@@ -29,7 +29,7 @@ export default function WorkoutDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<LocalWorkoutSession | null>(null);
   const [sets, setSets] = useState<LocalWorkoutSet[]>([]);
-  const [hasPr, setHasPr] = useState(false);
+  const [prSetIds, setPrSetIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -45,7 +45,7 @@ export default function WorkoutDetailScreen() {
       ]);
       setSession(s);
       setSets(setRows);
-      setHasPr(achievements.length > 0);
+      setPrSetIds(new Set(achievements.map((a) => a.sourceSetLogId)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load this session.');
     } finally {
@@ -97,7 +97,7 @@ export default function WorkoutDetailScreen() {
 
   const segments: LiftStackSegment[] = sets
     .filter((s) => s.isCompleted && s.setType === 'working')
-    .map((s) => ({ key: s.id, volume: (s.reps ?? 0) * (s.weightKg ?? (s.isBodyweight ? 1 : 0)), isPr: false }));
+    .map((s) => ({ key: s.id, volume: (s.reps ?? 0) * (s.weightKg ?? (s.isBodyweight ? 1 : 0)), isPr: prSetIds.has(s.id) }));
 
   const muscles = Array.from(new Set(sets.map((s) => s.primaryMuscleSnapshot).filter((m): m is NonNullable<typeof m> => !!m)));
 
@@ -114,7 +114,7 @@ export default function WorkoutDetailScreen() {
           <Text style={[theme.type.displayMd, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.6}>
             {session.title ?? 'Workout'}
           </Text>
-          {hasPr && <PrBadge />}
+          {prSetIds.size > 0 && <PrBadge />}
         </View>
         <Text style={[theme.type.label, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
           {formatRelativeDateTime(session.occurredAt)}

@@ -306,6 +306,8 @@ export type LocalCustomExercise = {
   deletedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  /** Has this row's id ever been confirmed by a successful server INSERT (first-create vs. edit for the push side). */
+  serverConfirmed: boolean;
   syncStatus: SyncStatus;
   lastSyncError: string | null;
 };
@@ -400,6 +402,8 @@ export type LocalWorkoutTemplate = {
   deletedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  /** Has this row's id ever been confirmed by a successful server INSERT (first-create vs. edit for the push side). */
+  serverConfirmed: boolean;
   syncStatus: SyncStatus;
   lastSyncError: string | null;
 };
@@ -419,6 +423,8 @@ export type LocalWorkoutTemplateExercise = {
   targetRestSeconds: number | null;
   notes: string | null;
   deletedLocally: boolean; // real DELETE server-side (§8), so local removal just needs a "pending delete" marker until pushed
+  /** Has this exact child row's id ever been confirmed by a successful server INSERT. */
+  serverConfirmed: boolean;
   syncStatus: SyncStatus;
   lastSyncError: string | null;
 };
@@ -432,6 +438,8 @@ export type LocalProgram = {
   deletedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  /** Has this row's id ever been confirmed by a successful server INSERT (first-create vs. edit for the push side). */
+  serverConfirmed: boolean;
   syncStatus: SyncStatus;
   lastSyncError: string | null;
 };
@@ -446,6 +454,8 @@ export type LocalProgramWorkout = {
   dayNumber: number | null;
   sortOrder: number;
   deletedLocally: boolean;
+  /** Has this exact child row's id ever been confirmed by a successful server INSERT. */
+  serverConfirmed: boolean;
   syncStatus: SyncStatus;
   lastSyncError: string | null;
 };

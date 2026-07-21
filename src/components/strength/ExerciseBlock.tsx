@@ -15,6 +15,8 @@ type Props = {
   unitWeight: UnitWeightSnapshot;
   isFirst: boolean;
   isLast: boolean;
+  /** Sets in THIS session that beat a cached strength record (design doc §CORE-12) — drives each row's inline "New best" `PrBadge`. */
+  prSetIds: Set<string>;
   onChangeSet: (setId: string, partial: Partial<Pick<LocalWorkoutSet, 'reps' | 'weightKg' | 'durationSeconds' | 'distanceM'>>) => void;
   onCompleteSet: (setId: string) => void;
   onUncompleteSet: (setId: string) => void;
@@ -34,7 +36,7 @@ type Props = {
  * task report) and Remove exercise (names the consequence when sets are
  * already completed, per the destructive-action rule).
  */
-export function ExerciseBlock({ block, unitWeight, isFirst, isLast, onChangeSet, onCompleteSet, onUncompleteSet, onRemoveSet, onAddSet, onMoveUp, onMoveDown, onRemoveExercise }: Props) {
+export function ExerciseBlock({ block, unitWeight, isFirst, isLast, prSetIds, onChangeSet, onCompleteSet, onUncompleteSet, onRemoveSet, onAddSet, onMoveUp, onMoveDown, onRemoveExercise }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
@@ -62,6 +64,7 @@ export function ExerciseBlock({ block, unitWeight, isFirst, isLast, onChangeSet,
           fieldFlags={block.fieldFlags}
           unitWeight={unitWeight}
           previous={previousByNumber.get(set.setNumber) ?? null}
+          isPr={prSetIds.has(set.id)}
           onChange={(partial) => onChangeSet(set.id, partial)}
           onComplete={() => onCompleteSet(set.id)}
           onUncomplete={() => onUncompleteSet(set.id)}

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { theme } from '../../theme';
 import { SetTypeTag } from './SetTypeTag';
+import { PrBadge } from '../activity/PrBadge';
 import { displayWeightToKg, formatDuration, formatReps, formatWeightValue } from '../../lib/format';
 import type { ExerciseFieldFlags, LocalWorkoutSet, UnitWeightSnapshot } from '../../db/types';
 
@@ -11,6 +12,8 @@ type Props = {
   fieldFlags: ExerciseFieldFlags;
   unitWeight: UnitWeightSnapshot;
   previous: LocalWorkoutSet | null;
+  /** This set beat a cached strength record (design doc §CORE-12 "the completion moment") — renders the inline "New best" `PrBadge`. */
+  isPr?: boolean;
   onChange: (partial: Partial<Pick<LocalWorkoutSet, 'reps' | 'weightKg' | 'durationSeconds' | 'distanceM'>>) => void;
   onComplete: () => void;
   onUncomplete: () => void;
@@ -25,7 +28,7 @@ type Props = {
  * non-color signal a screen-reader/sunlight-glare user still gets even
  * without perceiving the color change.
  */
-export function SetRow({ set, fieldFlags, unitWeight, previous, onChange, onComplete, onUncomplete, onRemove }: Props) {
+export function SetRow({ set, fieldFlags, unitWeight, previous, isPr = false, onChange, onComplete, onUncomplete, onRemove }: Props) {
   const locked = set.isCompleted;
   const isWarmup = set.setType === 'warmup';
 
@@ -50,7 +53,10 @@ export function SetRow({ set, fieldFlags, unitWeight, previous, onChange, onComp
       </View>
 
       <Text
-        style={[theme.type.caption, theme.fontVariation.metric, { color: theme.color.text.tertiary }]}
+        // text.tertiary never clears AA at normal caption size (tokens.md
+        // §"Contrast" — 4.15:1, large/UI text only) — text.secondary here,
+        // same fix already applied to StrengthRecordRow/WorkoutRow/SyncStatusPill.
+        style={[theme.type.caption, theme.fontVariation.metric, { color: theme.color.text.secondary }]}
         maxFontSizeMultiplier={1.6}
         numberOfLines={1}
         accessibilityLabel={`Previous: ${prevLabel}`}
@@ -84,6 +90,8 @@ export function SetRow({ set, fieldFlags, unitWeight, previous, onChange, onComp
           </>
         )}
       </View>
+
+      {isPr && <PrBadge label="New best" />}
 
       <Pressable
         onPress={locked ? onUncomplete : onComplete}

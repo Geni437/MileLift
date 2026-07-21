@@ -21,8 +21,9 @@ type Props = {
  * SetTypeTag — component vocabulary §A: a compact non-color glyph+label for
  * `set_type`. Working sets are just the plain set index number (no tag);
  * everything else carries a short glyph/label so type is never color-only.
- * Warmups render de-emphasized (`text.tertiary`) since they're excluded from
- * volume/PR (§4.1).
+ * Warmups render de-emphasized — `text.secondary`, not `text.tertiary`: this
+ * label renders at `type.overline` (11px), well under the "≥18.66px bold or
+ * ≥24px" floor `text.tertiary` needs to clear AA (tokens.md "Contrast").
  */
 export function SetTypeTag({ setType, setNumber }: Props) {
   if (setType === 'working') {
@@ -33,13 +34,9 @@ export function SetTypeTag({ setType, setNumber }: Props) {
     );
   }
 
-  const deemphasized = setType === 'warmup';
   return (
     <View style={styles.container}>
-      <Text
-        style={[theme.type.overline, { color: deemphasized ? theme.color.text.tertiary : theme.color.text.secondary }]}
-        maxFontSizeMultiplier={1.8}
-      >
+      <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
         {LABEL[setType]}
       </Text>
     </View>

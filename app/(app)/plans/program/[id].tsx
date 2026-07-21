@@ -5,7 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { theme } from '../../../../src/theme';
 import { Field } from '../../../../src/components/Field';
-import { PrimaryButton } from '../../../../src/components/PrimaryButton';
 import { TextButton } from '../../../../src/components/TextButton';
 import { InlineBanner } from '../../../../src/components/InlineBanner';
 import { programsRepository } from '../../../../src/db/repositories/programsRepository';
@@ -113,7 +112,8 @@ export default function ProgramBuilderScreen() {
         )}
         <TextButton label="＋ Add slot" disabled={templates.length === 0} onPress={() => setShowAddSlot(true)} />
         {templates.length === 0 && (
-          <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+          // text.tertiary never clears AA at normal caption size (tokens.md "Contrast") — text.secondary.
+          <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
             Create a template first (Plans › Templates).
           </Text>
         )}
@@ -152,12 +152,22 @@ function AddSlotSheet({
             <Text style={[theme.type.label, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
               Choose a template
             </Text>
+            {/* A plain selectable row list, not one ember PrimaryButton per
+                template — tokens.md: "ember is spent, not sprinkled ... if
+                two things on a screen are ember, one of them is wrong."
+                Mirrors WorkoutRow/lift.tsx's own SheetOption row pattern. */}
             {templates.map((t) => (
-              <PrimaryButton
+              <Pressable
                 key={t.id}
-                label={t.name}
                 onPress={() => onAdd(t, week.trim() ? Number(week) : null, day.trim() ? Number(day) : null)}
-              />
+                accessibilityRole="button"
+                accessibilityLabel={t.name}
+                style={({ pressed }) => [styles.templateOption, { borderColor: theme.color.border.subtle }, pressed && { opacity: theme.opacity.pressed }]}
+              >
+                <Text style={[theme.type.bodyStrong, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.8}>
+                  {t.name}
+                </Text>
+              </Pressable>
             ))}
             <TextButton label="Cancel" onPress={onClose} />
           </View>
@@ -172,6 +182,7 @@ const styles = StyleSheet.create({
   content: { padding: theme.screen.edge, gap: theme.space.md },
   headerRow: { flexDirection: 'row' },
   slotRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: theme.border.hairline, borderRadius: theme.radius.md, padding: theme.space.sm },
+  templateOption: { minHeight: theme.touchTarget.comfortable, justifyContent: 'center', paddingHorizontal: theme.space.sm, borderWidth: theme.border.hairline, borderRadius: theme.radius.md },
   scrim: { flex: 1, justifyContent: 'flex-end' },
   sheetWrap: { width: '100%' },
   sheet: { borderTopLeftRadius: theme.radius.xl, borderTopRightRadius: theme.radius.xl, padding: theme.space.lg, gap: theme.space.sm, maxHeight: '80%' },

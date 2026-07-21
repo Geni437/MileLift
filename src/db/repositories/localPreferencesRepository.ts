@@ -8,6 +8,8 @@ export type LocalPreferences = {
   onboardingCompletedAt: string | null;
   /** Which metric occupies the recording screen's hero slot — remembered locally per design doc CORE-01 ("The choice is remembered locally"). */
   recordingHeroMetric: RecordingHeroMetric;
+  /** Per-device "Always reveal" opt-out for progress-photo tiles (design doc CORE-16) — never blurs on THIS device when true. */
+  photosAlwaysReveal: boolean;
 };
 
 type Row = {
@@ -15,6 +17,7 @@ type Row = {
   training_balance_run: number;
   onboarding_completed_at: string | null;
   recording_hero_metric: string;
+  photos_always_reveal: number;
 };
 
 /**
@@ -36,14 +39,26 @@ export const localPreferencesRepository = {
     const db = await getDb();
     const row = await db.getFirstAsync<Row>('SELECT * FROM local_preferences WHERE user_id = ?', [userId]);
     if (!row) {
-      return { userId, trainingBalanceRun: 50, onboardingCompletedAt: null, recordingHeroMetric: 'duration' };
+      return { userId, trainingBalanceRun: 50, onboardingCompletedAt: null, recordingHeroMetric: 'duration', photosAlwaysReveal: false };
     }
     return {
       userId: row.user_id,
       trainingBalanceRun: row.training_balance_run,
       onboardingCompletedAt: row.onboarding_completed_at,
       recordingHeroMetric: (row.recording_hero_metric as RecordingHeroMetric) ?? 'duration',
+      photosAlwaysReveal: !!row.photos_always_reveal,
     };
+  },
+
+  async setPhotosAlwaysReveal(userId: string, alwaysReveal: boolean): Promise<void> {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT INTO local_preferences (user_id, training_balance_run, onboarding_completed_at, photos_always_reveal, updated_at)
+       VALUES (?, 50, NULL, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET photos_always_reveal = excluded.photos_always_reveal, updated_at = excluded.updated_at`,
+      [userId, alwaysReveal ? 1 : 0, now]
+    );
   },
 
   async setRecordingHeroMetric(userId: string, metric: RecordingHeroMetric): Promise<void> {

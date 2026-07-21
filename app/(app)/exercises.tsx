@@ -17,7 +17,20 @@ import { generateUuidV4 } from '../../src/lib/uuid';
 import { runSync } from '../../src/sync/syncEngine';
 import { useAuth } from '../../src/state/AuthContext';
 import { resolveExercisePicker, cancelExercisePicker } from '../../src/lib/exercisePickerBridge';
+import { resolveExerciseMediaUrl } from '../../src/lib/exerciseMedia';
 import type { LocalCustomExercise, LocalExercise, MuscleGroup } from '../../src/db/types';
+
+/** Batch-resolves + merges primary media URLs for a page of exercises into the running map — one query per visible page/search result set, never per-row (N+1). */
+async function loadImageUrls(exerciseIds: string[], setImageUrlByExerciseId: React.Dispatch<React.SetStateAction<Map<string, string>>>) {
+  if (exerciseIds.length === 0) return;
+  const mediaByExerciseId = await exercisesRepository.getPrimaryMediaFor(exerciseIds);
+  if (mediaByExerciseId.size === 0) return;
+  setImageUrlByExerciseId((prev) => {
+    const next = new Map(prev);
+    for (const [exerciseId, media] of mediaByExerciseId) next.set(exerciseId, resolveExerciseMediaUrl(media.urlOrObjectPath));
+    return next;
+  });
+}
 
 const MUSCLE_FILTERS: MuscleGroup[] = ['chest', 'back', 'quadriceps', 'shoulders', 'biceps', 'triceps', 'glutes', 'abs'];
 
@@ -36,6 +49,7 @@ export default function ExercisesScreen() {
   const [grouped, setGrouped] = useState<Map<MuscleGroup, LocalExercise[]>>(new Map());
   const [searchResults, setSearchResults] = useState<LocalExercise[] | null>(null);
   const [customExercises, setCustomExercises] = useState<LocalCustomExercise[]>([]);
+  const [imageUrlByExerciseId, setImageUrlByExerciseId] = useState<Map<string, string>>(new Map());
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [prefillName, setPrefillName] = useState('');
 
@@ -52,6 +66,7 @@ export default function ExercisesScreen() {
     setGrouped(groupedData);
     setCustomExercises(customData);
     setLoading(false);
+    void loadImageUrls(Array.from(groupedData.values()).flat().map((ex) => ex.id), setImageUrlByExerciseId);
   }
 
   useEffect(() => {
@@ -63,7 +78,10 @@ export default function ExercisesScreen() {
       setSearchResults(null);
       return;
     }
-    void exercisesRepository.search({ query, muscle: muscleFilter, equipment: null, cursorName: null }).then((page) => setSearchResults(page.items));
+    void exercisesRepository.search({ query, muscle: muscleFilter, equipment: null, cursorName: null }).then((page) => {
+      setSearchResults(page.items);
+      void loadImageUrls(page.items.map((ex) => ex.id), setImageUrlByExerciseId);
+    });
   }, [query, muscleFilter]);
 
   const handlePick = (ex: LocalExercise) => {
@@ -152,10 +170,18 @@ export default function ExercisesScreen() {
           data={searchResults}
           keyExtractor={(e) => e.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => <ExerciseRow name={item.name} primaryMuscle={item.primaryMuscle} equipment={item.equipment} onPress={() => handlePick(item)} />}
+          renderItem={({ item }) => (
+            <ExerciseRow
+              name={item.name}
+              primaryMuscle={item.primaryMuscle}
+              equipment={item.equipment}
+              imageUrl={imageUrlByExerciseId.get(item.id)}
+              onPress={() => handlePick(item)}
+            />
+          )}
         />
       ) : (
-        <GroupedList grouped={grouped} onPick={handlePick} />
+        <GroupedList grouped={grouped} imageUrlByExerciseId={imageUrlByExerciseId} onPick={handlePick} />
       )}
 
       <CustomExerciseSheet
@@ -177,7 +203,15 @@ export default function ExercisesScreen() {
   );
 }
 
-function GroupedList({ grouped, onPick }: { grouped: Map<MuscleGroup, LocalExercise[]>; onPick: (ex: LocalExercise) => void }) {
+function GroupedList({
+  grouped,
+  imageUrlByExerciseId,
+  onPick,
+}: {
+  grouped: Map<MuscleGroup, LocalExercise[]>;
+  imageUrlByExerciseId: Map<string, string>;
+  onPick: (ex: LocalExercise) => void;
+}) {
   const entries = useMemo(() => Array.from(grouped.entries()), [grouped]);
   if (entries.length === 0) {
     return (
@@ -197,7 +231,14 @@ function GroupedList({ grouped, onPick }: { grouped: Map<MuscleGroup, LocalExerc
             {muscle.replace('_', ' ')}
           </Text>
           {exercises.map((ex) => (
-            <ExerciseRow key={ex.id} name={ex.name} primaryMuscle={ex.primaryMuscle} equipment={ex.equipment} onPress={() => onPick(ex)} />
+            <ExerciseRow
+              key={ex.id}
+              name={ex.name}
+              primaryMuscle={ex.primaryMuscle}
+              equipment={ex.equipment}
+              imageUrl={imageUrlByExerciseId.get(ex.id)}
+              onPress={() => onPick(ex)}
+            />
           ))}
         </View>
       )}

@@ -10,6 +10,7 @@ type ProgramRow = {
   deleted_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  server_confirmed: number;
   sync_status: string;
   last_sync_error: string | null;
 };
@@ -24,6 +25,7 @@ type WorkoutRow = {
   day_number: number | null;
   sort_order: number;
   deleted_locally: number;
+  server_confirmed: number;
   sync_status: string;
   last_sync_error: string | null;
 };
@@ -38,6 +40,7 @@ function toLocal(row: ProgramRow): LocalProgram {
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    serverConfirmed: !!row.server_confirmed,
     syncStatus: row.sync_status as SyncStatus,
     lastSyncError: row.last_sync_error,
   };
@@ -54,6 +57,7 @@ function toLocalWorkout(row: WorkoutRow): LocalProgramWorkout {
     dayNumber: row.day_number,
     sortOrder: row.sort_order,
     deletedLocally: !!row.deleted_locally,
+    serverConfirmed: !!row.server_confirmed,
     syncStatus: row.sync_status as SyncStatus,
     lastSyncError: row.last_sync_error,
   };
@@ -77,7 +81,7 @@ export const programsRepository = {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.runAsync(
-      `INSERT INTO programs (id, user_id, name, description, length_weeks, created_at, updated_at, sync_status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      `INSERT INTO programs (id, user_id, name, description, length_weeks, created_at, updated_at, server_confirmed, sync_status) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pending')`,
       [id, userId, name, description, lengthWeeks, now, now]
     );
     return (await this.getById(id))!;
@@ -97,12 +101,25 @@ export const programsRepository = {
 
   async markSynced(id: string): Promise<void> {
     const db = await getDb();
-    await db.runAsync(`UPDATE programs SET sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
+    await db.runAsync(`UPDATE programs SET server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
   },
 
   async markFailed(id: string, message: string): Promise<void> {
     const db = await getDb();
     await db.runAsync(`UPDATE programs SET sync_status = 'failed', last_sync_error = ? WHERE id = ?`, [message, id]);
+  },
+
+  /** Has this row's id ever been confirmed by a successful server INSERT — first-create (plain INSERT) vs. edit (column-scoped UPDATE only) for the push side. */
+  async wasServerConfirmed(id: string): Promise<boolean> {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ server_confirmed: number }>('SELECT server_confirmed FROM programs WHERE id = ?', [id]);
+    return !!row?.server_confirmed;
+  },
+
+  /** Soft-deleted entirely offline before ever syncing — the server never saw it, so there is nothing to push; just remove it locally. */
+  async purgeLocalOnly(id: string): Promise<void> {
+    const db = await getDb();
+    await db.runAsync('DELETE FROM programs WHERE id = ? AND server_confirmed = 0', [id]);
   },
 
   async getUnsynced(userId: string): Promise<LocalProgram[]> {
@@ -118,9 +135,9 @@ export const programsRepository = {
         const existing = await db.getFirstAsync<ProgramRow>('SELECT * FROM programs WHERE id = ?', [row.id]);
         if (existing && existing.sync_status !== 'synced') continue;
         await db.runAsync(
-          `INSERT INTO programs (id, user_id, name, description, length_weeks, deleted_at, created_at, updated_at, sync_status, last_sync_error)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'synced', NULL)
-           ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description, length_weeks = excluded.length_weeks, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at, sync_status = 'synced', last_sync_error = NULL`,
+          `INSERT INTO programs (id, user_id, name, description, length_weeks, deleted_at, created_at, updated_at, server_confirmed, sync_status, last_sync_error)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'synced', NULL)
+           ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description, length_weeks = excluded.length_weeks, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at, server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL`,
           [row.id, row.user_id, row.name, row.description, row.length_weeks, row.deleted_at, row.created_at, row.updated_at]
         );
       }
@@ -151,7 +168,9 @@ export const programsRepository = {
     const db = await getDb();
     const row = await db.getFirstAsync<WorkoutRow>('SELECT * FROM program_workouts WHERE id = ?', [id]);
     if (!row) return;
-    if (row.sync_status !== 'synced') {
+    if (!row.server_confirmed) {
+      // Never confirmed synced yet (even if a since-superseded edit is
+      // mid-flight as 'pending') — nothing server-side references it.
       await db.runAsync('DELETE FROM program_workouts WHERE id = ?', [id]);
       return;
     }
@@ -166,7 +185,14 @@ export const programsRepository = {
 
   async markWorkoutSynced(id: string): Promise<void> {
     const db = await getDb();
-    await db.runAsync(`UPDATE program_workouts SET sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
+    await db.runAsync(`UPDATE program_workouts SET server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
+  },
+
+  /** Has this exact child row's id ever been confirmed by a successful server INSERT. */
+  async wasWorkoutServerConfirmed(id: string): Promise<boolean> {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ server_confirmed: number }>('SELECT server_confirmed FROM program_workouts WHERE id = ?', [id]);
+    return !!row?.server_confirmed;
   },
 
   async purgeSyncedDeletedWorkout(id: string): Promise<void> {
@@ -184,5 +210,19 @@ export const programsRepository = {
     const db = await getDb();
     const rows = await db.getAllAsync<{ template_id: string }>('SELECT DISTINCT template_id FROM program_workouts WHERE user_id = ? AND deleted_locally = 0', [userId]);
     return new Set(rows.map((r) => r.template_id));
+  },
+
+  /** Batch template-slot count per program — the Plans landing "Programs" row's "template count" (design doc §CORE-14). */
+  async getTemplateCountsForPrograms(programIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (programIds.length === 0) return map;
+    const db = await getDb();
+    const placeholders = programIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ program_id: string; n: number }>(
+      `SELECT program_id, COUNT(*) as n FROM program_workouts WHERE program_id IN (${placeholders}) AND deleted_locally = 0 GROUP BY program_id`,
+      programIds
+    );
+    for (const row of rows) map.set(row.program_id, row.n);
+    return map;
   },
 };

@@ -69,7 +69,7 @@ export default function LiftScreen() {
 }
 
 function LogSegment({ userId, unitWeight }: { userId: string | null; unitWeight: 'kg' | 'lb' }) {
-  const { loadState, loadError, weeks, prBySessionId, hasMore, loadingMore, refreshing, loadMore, refresh, retrySync } = useWorkoutLog(userId);
+  const { loadState, loadError, weeks, prBySessionId, segmentsBySessionId, hasMore, loadingMore, refreshing, loadMore, refresh, retrySync } = useWorkoutLog(userId);
 
   if (loadState === 'loading') {
     return (
@@ -134,7 +134,7 @@ function LogSegment({ userId, unitWeight }: { userId: string | null; unitWeight:
               key={session.id}
               session={session}
               unitWeight={unitWeight}
-              segments={[]}
+              segments={segmentsBySessionId.get(session.id) ?? []}
               hasPr={prBySessionId.has(session.id)}
               onPress={() => router.push({ pathname: '/workout/[id]', params: { id: session.id } })}
               onRetrySync={session.syncStatus === 'failed' ? retrySync : undefined}

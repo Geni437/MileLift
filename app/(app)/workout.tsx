@@ -22,6 +22,8 @@ import { customExercisesRepository } from '../../src/db/repositories/customExerc
 import { workoutTemplatesRepository } from '../../src/db/repositories/workoutTemplatesRepository';
 import { openExercisePicker } from '../../src/lib/exercisePickerBridge';
 import { useWorkoutEngine, type ExercisePick, type FinishDraft } from '../../src/features/strength/useWorkoutEngine';
+import { exerciseRefKey } from '../../src/db/repositories/strengthRecordsRepository';
+import { candidateMetricsForExercise } from '../../src/features/strength/strengthPrEngine';
 import { useAuth } from '../../src/state/AuthContext';
 import { useProfile } from '../../src/state/ProfileContext';
 import type { ExerciseFieldFlags, MuscleGroup } from '../../src/db/types';
@@ -159,11 +161,38 @@ export default function WorkoutScreen() {
     );
   }
 
+  const prSetIds = new Set(engine.achievements.map((a) => a.sourceSetLogId));
+
   const segments: LiftStackSegment[] = engine.exerciseBlocks.flatMap((block) =>
     block.sets
       .filter((s) => s.isCompleted && s.setType === 'working')
-      .map((s) => ({ key: s.id, volume: (s.reps ?? 0) * (s.weightKg ?? (s.isBodyweight ? 1 : 0)), isPr: false }))
+      .map((s) => ({ key: s.id, volume: (s.reps ?? 0) * (s.weightKg ?? (s.isBodyweight ? 1 : 0)), isPr: prSetIds.has(s.id) }))
   );
+
+  // The live rail's "previous best" tick (design doc §A: "the current
+  // exercise's prior best ... a faint horizontal tick, live variant only") —
+  // scoped to the most-recently-completed working set's exercise block, using
+  // whichever PR metric its segment height actually represents (best_set_volume
+  // for a weighted movement, max_reps for bodyweight — mirroring the same
+  // metric `evaluateExerciseCandidates` would pick for this movement type).
+  // `prCacheByRef` is frozen at session-start per exercise (see its doc
+  // comment in useWorkoutEngine), so this stays fixed at "the bar to beat"
+  // rather than jumping once that bar is actually cleared.
+  let previousBestTickRatio: number | null = null;
+  if (segments.length > 0) {
+    const newestSegment = segments[segments.length - 1]!;
+    const newestBlock = engine.exerciseBlocks.find((b) => b.sets.some((s) => s.id === newestSegment.key));
+    if (newestBlock) {
+      const ref = exerciseRefKey(newestBlock.exerciseId, newestBlock.customExerciseId);
+      const cache = engine.prCacheByRef.get(ref);
+      const metric = candidateMetricsForExercise(newestBlock.fieldFlags).find((m) => m === 'best_set_volume' || m === 'max_reps');
+      const cachedValue = metric ? cache?.get(metric)?.value ?? null : null;
+      if (cachedValue != null) {
+        const maxVolume = Math.max(1, ...segments.map((s) => s.volume));
+        previousBestTickRatio = cachedValue / maxVolume;
+      }
+    }
+  }
 
   const elapsedSeconds = Math.round((now.getTime() - new Date(engine.session.occurredAt).getTime()) / 1000);
 
@@ -199,6 +228,7 @@ export default function WorkoutScreen() {
                 unitWeight={unitWeight}
                 isFirst={index === 0}
                 isLast={index === engine.exerciseBlocks.length - 1}
+                prSetIds={prSetIds}
                 onChangeSet={(setId, partial) => void engine.updateSet(setId, partial)}
                 onCompleteSet={(setId) => void engine.completeSet(setId)}
                 onUncompleteSet={(setId) => void engine.uncompleteSet(setId)}
@@ -213,7 +243,7 @@ export default function WorkoutScreen() {
         )}
 
         <View style={styles.liftStackRail}>
-          <LiftStack variant="live" segments={segments} />
+          <LiftStack variant="live" segments={segments} previousBestTickRatio={previousBestTickRatio} />
         </View>
       </View>
 

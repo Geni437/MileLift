@@ -16,6 +16,7 @@ import { LockGlyph } from '../../src/components/LockGlyph';
 import { bodyweightRepository } from '../../src/db/repositories/bodyweightRepository';
 import { bodyMeasurementsRepository } from '../../src/db/repositories/bodyMeasurementsRepository';
 import { progressPhotosRepository } from '../../src/db/repositories/progressPhotosRepository';
+import { localPreferencesRepository } from '../../src/db/repositories/localPreferencesRepository';
 import { generateUuidV4 } from '../../src/lib/uuid';
 import { runSync } from '../../src/sync/syncEngine';
 import { useAuth } from '../../src/state/AuthContext';
@@ -29,6 +30,20 @@ function localDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+/** Humanized display labels for the internal `measurement_kind` enum — never rendered raw in the UI. */
+const MEASUREMENT_KIND_LABELS: Record<MeasurementKind, string> = {
+  waist: 'Waist',
+  chest: 'Chest',
+  hips: 'Hips',
+  thigh: 'Thigh',
+  biceps: 'Biceps',
+  calf: 'Calf',
+  neck: 'Neck',
+  shoulders: 'Shoulders',
+  forearm: 'Forearm',
+  body_fat_pct: 'Body fat %',
+};
+
 /** CORE-16 — Body landing: current weight, latest measurements, progress photos (the gated section). */
 export default function BodyScreen() {
   const { userId } = useAuth();
@@ -39,6 +54,7 @@ export default function BodyScreen() {
   const [latestWeight, setLatestWeight] = useState<LocalBodyweightLog | null>(null);
   const [latestValues, setLatestValues] = useState<Map<MeasurementKind, { value: number; unitSnapshot: string }>>(new Map());
   const [photos, setPhotos] = useState<LocalProgressPhoto[]>([]);
+  const [photosAlwaysReveal, setPhotosAlwaysReveal] = useState(false);
   const [showWeightSheet, setShowWeightSheet] = useState(false);
   const [showMeasurementSheet, setShowMeasurementSheet] = useState(false);
   const [showHealthConsent, setShowHealthConsent] = useState(false);
@@ -51,15 +67,24 @@ export default function BodyScreen() {
 
   const load = React.useCallback(async () => {
     if (!userId) return;
-    const [weight, values, photoList] = await Promise.all([
+    const [weight, values, photoList, prefs] = await Promise.all([
       bodyweightRepository.getLatest(userId),
       bodyMeasurementsRepository.latestValuePerKind(userId),
       progressPhotosRepository.listForUser(userId),
+      localPreferencesRepository.get(userId),
     ]);
     setLatestWeight(weight);
     setLatestValues(values);
     setPhotos(photoList);
+    setPhotosAlwaysReveal(prefs.photosAlwaysReveal);
   }, [userId]);
+
+  const handleToggleAlwaysReveal = async () => {
+    if (!userId) return;
+    const next = !photosAlwaysReveal;
+    setPhotosAlwaysReveal(next);
+    await localPreferencesRepository.setPhotosAlwaysReveal(userId, next);
+  };
 
   useEffect(() => {
     // Synchronizes local body/photo state with the local SQLite store on
@@ -117,11 +142,21 @@ export default function BodyScreen() {
               No measurements logged yet.
             </Text>
           ) : (
-            Array.from(latestValues.entries()).map(([kind, v]) => (
-              <Text key={kind} style={[theme.type.body, { color: theme.color.text.primary }]} maxFontSizeMultiplier={2}>
-                {kind}: {v.value} {v.unitSnapshot}
-              </Text>
-            ))
+            // Metric-face value + humanized label dual readout — mirrors the
+            // SaveSheet SummaryStat pattern, never the raw internal enum
+            // (`waist`, `hips`, ...) as plain body text.
+            <View style={styles.measurementGrid}>
+              {Array.from(latestValues.entries()).map(([kind, v]) => (
+                <View key={kind} style={styles.measurementItem}>
+                  <Text style={[theme.type.metricMd, theme.fontVariation.metric, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.6}>
+                    {v.value} {v.unitSnapshot}
+                  </Text>
+                  <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
+                    {MEASUREMENT_KIND_LABELS[kind].toUpperCase()}
+                  </Text>
+                </View>
+              ))}
+            </View>
           )}
           <SecondaryButton label="Log measurements" onPress={() => requireHealthConsent('measurement')} />
         </View>
@@ -149,11 +184,25 @@ export default function BodyScreen() {
                 {photos.slice(0, 6).flatMap((occasion) =>
                   occasion.images.map((img) => (
                     <View key={img.id} style={styles.photoTileWrap}>
-                      <PhotoTile uri={img.localUri} label={img.pose} />
+                      <PhotoTile uri={img.localUri} label={img.pose} alwaysReveal={photosAlwaysReveal} />
                     </View>
                   ))
                 )}
               </View>
+              <Pressable
+                onPress={() => void handleToggleAlwaysReveal()}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: photosAlwaysReveal }}
+                accessibilityLabel="Always reveal photos on this device"
+                style={styles.alwaysRevealRow}
+              >
+                <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
+                  Always reveal on this device
+                </Text>
+                <Text style={[theme.type.label, { color: photosAlwaysReveal ? theme.color.accent.primary : theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
+                  {photosAlwaysReveal ? 'On' : 'Off'}
+                </Text>
+              </Pressable>
               <View style={styles.photoActionsRow}>
                 <TextButton label="＋ Add photo" onPress={() => void handleAddPhoto()} />
                 <TextButton label="Compare" onPress={() => router.push('/body/photos')} />
@@ -364,9 +413,12 @@ const styles = StyleSheet.create({
   section: { gap: theme.space.sm },
   photosHeader: { flexDirection: 'row', alignItems: 'center', gap: theme.space.xs },
   declinedState: { gap: theme.space.xs },
+  measurementGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md },
+  measurementItem: { gap: 2, minWidth: 80 },
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.xs },
   photoTileWrap: { width: '30%' },
   photoActionsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  alwaysRevealRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: theme.touchTarget.min },
   scrim: { flex: 1, justifyContent: 'flex-end' },
   sheetWrap: { width: '100%' },
   sheet: { borderTopLeftRadius: theme.radius.xl, borderTopRightRadius: theme.radius.xl, padding: theme.space.lg, gap: theme.space.md },

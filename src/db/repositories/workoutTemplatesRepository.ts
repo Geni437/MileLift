@@ -10,6 +10,7 @@ type TemplateRow = {
   deleted_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  server_confirmed: number;
   sync_status: string;
   last_sync_error: string | null;
 };
@@ -29,6 +30,7 @@ type ExerciseRow = {
   target_rest_seconds: number | null;
   notes: string | null;
   deleted_locally: number;
+  server_confirmed: number;
   sync_status: string;
   last_sync_error: string | null;
 };
@@ -42,6 +44,7 @@ function toLocal(row: TemplateRow): LocalWorkoutTemplate {
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    serverConfirmed: !!row.server_confirmed,
     syncStatus: row.sync_status as SyncStatus,
     lastSyncError: row.last_sync_error,
   };
@@ -63,6 +66,7 @@ function toLocalExercise(row: ExerciseRow): LocalWorkoutTemplateExercise {
     targetRestSeconds: row.target_rest_seconds,
     notes: row.notes,
     deletedLocally: !!row.deleted_locally,
+    serverConfirmed: !!row.server_confirmed,
     syncStatus: row.sync_status as SyncStatus,
     lastSyncError: row.last_sync_error,
   };
@@ -99,7 +103,7 @@ export const workoutTemplatesRepository = {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.runAsync(
-      `INSERT INTO workout_templates (id, user_id, name, description, created_at, updated_at, sync_status) VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+      `INSERT INTO workout_templates (id, user_id, name, description, created_at, updated_at, server_confirmed, sync_status) VALUES (?, ?, ?, ?, ?, ?, 0, 'pending')`,
       [id, userId, name, description, now, now]
     );
     return (await this.getById(id))!;
@@ -119,12 +123,25 @@ export const workoutTemplatesRepository = {
 
   async markSynced(id: string): Promise<void> {
     const db = await getDb();
-    await db.runAsync(`UPDATE workout_templates SET sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
+    await db.runAsync(`UPDATE workout_templates SET server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
   },
 
   async markFailed(id: string, message: string): Promise<void> {
     const db = await getDb();
     await db.runAsync(`UPDATE workout_templates SET sync_status = 'failed', last_sync_error = ? WHERE id = ?`, [message, id]);
+  },
+
+  /** Has this row's id ever been confirmed by a successful server INSERT — first-create (plain INSERT) vs. edit (column-scoped UPDATE only) for the push side. */
+  async wasServerConfirmed(id: string): Promise<boolean> {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ server_confirmed: number }>('SELECT server_confirmed FROM workout_templates WHERE id = ?', [id]);
+    return !!row?.server_confirmed;
+  },
+
+  /** Soft-deleted entirely offline before ever syncing — the server never saw it, so there is nothing to push; just remove it locally. */
+  async purgeLocalOnly(id: string): Promise<void> {
+    const db = await getDb();
+    await db.runAsync('DELETE FROM workout_templates WHERE id = ? AND server_confirmed = 0', [id]);
   },
 
   async getUnsynced(userId: string): Promise<LocalWorkoutTemplate[]> {
@@ -140,9 +157,9 @@ export const workoutTemplatesRepository = {
         const existing = await db.getFirstAsync<TemplateRow>('SELECT * FROM workout_templates WHERE id = ?', [row.id]);
         if (existing && existing.sync_status !== 'synced') continue;
         await db.runAsync(
-          `INSERT INTO workout_templates (id, user_id, name, description, deleted_at, created_at, updated_at, sync_status, last_sync_error)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', NULL)
-           ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at, sync_status = 'synced', last_sync_error = NULL`,
+          `INSERT INTO workout_templates (id, user_id, name, description, deleted_at, created_at, updated_at, server_confirmed, sync_status, last_sync_error)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'synced', NULL)
+           ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at, server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL`,
           [row.id, row.user_id, row.name, row.description, row.deleted_at, row.created_at, row.updated_at]
         );
       }
@@ -178,8 +195,9 @@ export const workoutTemplatesRepository = {
     const db = await getDb();
     const row = await db.getFirstAsync<ExerciseRow>('SELECT * FROM workout_template_exercises WHERE id = ?', [id]);
     if (!row) return;
-    if (row.sync_status !== 'synced') {
-      // Never confirmed synced yet — nothing server-side references it.
+    if (!row.server_confirmed) {
+      // Never confirmed synced yet (even if a since-superseded edit is
+      // mid-flight as 'pending') — nothing server-side references it.
       await db.runAsync('DELETE FROM workout_template_exercises WHERE id = ?', [id]);
       return;
     }
@@ -206,12 +224,19 @@ export const workoutTemplatesRepository = {
 
   async markExerciseSynced(id: string): Promise<void> {
     const db = await getDb();
-    await db.runAsync(`UPDATE workout_template_exercises SET sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
+    await db.runAsync(`UPDATE workout_template_exercises SET server_confirmed = 1, sync_status = 'synced', last_sync_error = NULL WHERE id = ?`, [id]);
   },
 
   async purgeSyncedDeletedExercise(id: string): Promise<void> {
     const db = await getDb();
     await db.runAsync('DELETE FROM workout_template_exercises WHERE id = ?', [id]);
+  },
+
+  /** Has this exact child row's id ever been confirmed by a successful server INSERT. */
+  async wasExerciseServerConfirmed(id: string): Promise<boolean> {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ server_confirmed: number }>('SELECT server_confirmed FROM workout_template_exercises WHERE id = ?', [id]);
+    return !!row?.server_confirmed;
   },
 
   async markExerciseFailed(id: string, message: string): Promise<void> {
@@ -228,9 +253,9 @@ export const workoutTemplatesRepository = {
         const existing = await db.getFirstAsync<ExerciseRow>('SELECT * FROM workout_template_exercises WHERE id = ?', [row.id]);
         if (existing && existing.sync_status !== 'synced') continue;
         await db.runAsync(
-          `INSERT INTO workout_template_exercises (id, template_id, user_id, exercise_id, custom_exercise_id, exercise_name_snapshot, exercise_order, target_sets, target_reps_low, target_reps_high, target_weight_kg, target_rest_seconds, notes, sync_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
-           ON CONFLICT(id) DO UPDATE SET exercise_order = excluded.exercise_order, target_sets = excluded.target_sets, target_reps_low = excluded.target_reps_low, target_reps_high = excluded.target_reps_high, target_weight_kg = excluded.target_weight_kg, target_rest_seconds = excluded.target_rest_seconds, notes = excluded.notes, sync_status = 'synced'`,
+          `INSERT INTO workout_template_exercises (id, template_id, user_id, exercise_id, custom_exercise_id, exercise_name_snapshot, exercise_order, target_sets, target_reps_low, target_reps_high, target_weight_kg, target_rest_seconds, notes, server_confirmed, sync_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'synced')
+           ON CONFLICT(id) DO UPDATE SET exercise_order = excluded.exercise_order, target_sets = excluded.target_sets, target_reps_low = excluded.target_reps_low, target_reps_high = excluded.target_reps_high, target_weight_kg = excluded.target_weight_kg, target_rest_seconds = excluded.target_rest_seconds, notes = excluded.notes, server_confirmed = 1, sync_status = 'synced'`,
           [row.id, templateId, row.user_id, row.exercise_id, row.custom_exercise_id, row.exercise_name_snapshot, row.exercise_order, row.target_sets, row.target_reps_low, row.target_reps_high, row.target_weight_kg, row.target_rest_seconds, row.notes]
         );
       }
@@ -244,6 +269,36 @@ export const workoutTemplatesRepository = {
         }
       }
     });
+  },
+
+  /**
+   * Batch "exercise count + planned-shape micro" summary for the Plans
+   * landing list (design doc §CORE-14: "name, exercise count, a
+   * `LiftStack:static`-style micro of the planned shape"). Since a template
+   * has no logged sets, each segment's "volume" is a plan-shape proxy —
+   * `target_sets × (target_reps_high ?? target_reps_low ?? 1)` — rather than
+   * an actual completed volume; this stays reasonable even when
+   * `target_weight_kg` is left unset (a common case for a fresh template).
+   */
+  async getExerciseSummariesForTemplates(templateIds: string[]): Promise<Map<string, { count: number; segments: { id: string; volume: number }[] }>> {
+    const map = new Map<string, { count: number; segments: { id: string; volume: number }[] }>();
+    if (templateIds.length === 0) return map;
+    const db = await getDb();
+    const placeholders = templateIds.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ id: string; template_id: string; target_sets: number | null; target_reps_low: number | null; target_reps_high: number | null }>(
+      `SELECT id, template_id, target_sets, target_reps_low, target_reps_high FROM workout_template_exercises
+       WHERE template_id IN (${placeholders}) AND deleted_locally = 0
+       ORDER BY template_id, exercise_order ASC`,
+      templateIds
+    );
+    for (const row of rows) {
+      const entry = map.get(row.template_id) ?? { count: 0, segments: [] };
+      entry.count += 1;
+      const reps = row.target_reps_high ?? row.target_reps_low ?? 1;
+      entry.segments.push({ id: row.id, volume: (row.target_sets ?? 1) * reps });
+      map.set(row.template_id, entry);
+    }
+    return map;
   },
 
   newId(): string {

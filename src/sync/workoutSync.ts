@@ -184,9 +184,6 @@ async function reconcileStrengthPrs(
   session: LocalWorkoutSession,
   serverAchievements: { metric: StrengthPrMetric; value: number; source_set_log_id: string }[]
 ): Promise<void> {
-  const allSets = await workoutSessionsRepository.getSetsForSession(session.id, { includeDeleted: true });
-  const setById = new Map(allSets.map((s) => [s.id, s]));
-
   for (const server of serverAchievements) {
     await strengthAchievementsRepository.confirm(session.id, server.source_set_log_id, session.userId, server.metric, server.value);
   }
@@ -199,11 +196,6 @@ async function reconcileStrengthPrs(
       await strengthAchievementsRepository.retractOptimisticForSession(local.sourceSetLogId, local.metric);
     }
   }
-
-  // Silence an unused-variable lint if setById ever stops being needed by a
-  // future edit here — currently reserved for exercise-ref lookups a caller
-  // of this function may want (kept minimal deliberately: see doc comment).
-  void setById;
 }
 
 export async function pullWorkoutSessions(userId: string): Promise<void> {
@@ -300,8 +292,22 @@ export async function refreshExerciseLibraryIfStale(): Promise<void> {
 export async function pushCustomExercises(userId: string): Promise<void> {
   const unsynced = await customExercisesRepository.getUnsynced(userId);
   for (const ex of unsynced) {
-    const { error } = await supabase.from('custom_exercises').upsert(
-      {
+    if (ex.deletedAt && !ex.serverConfirmed) {
+      // Created and soft-deleted entirely offline before ever syncing —
+      // nothing to push.
+      await customExercisesRepository.purgeLocalOnly(ex.id);
+      continue;
+    }
+    // NEVER `.upsert()` a whole row against a table with a column-scoped
+    // UPDATE grant (module doc comment above) — PostgREST compiles `.upsert()`
+    // into `INSERT ... ON CONFLICT DO UPDATE SET <every payload column except
+    // the conflict target>`, and Postgres checks UPDATE privilege on every
+    // SET-target column at PLAN TIME. custom_exercises' grant excludes
+    // id/user_id/created_at, so a whole-row upsert fails on the very first
+    // insert of a new row. Plain INSERT for first-create, column-scoped
+    // UPDATE (exactly the grantable mutable columns) for an edit.
+    if (!ex.serverConfirmed) {
+      const { error } = await supabase.from('custom_exercises').insert({
         id: ex.id,
         user_id: ex.userId,
         name: ex.name,
@@ -313,16 +319,34 @@ export async function pushCustomExercises(userId: string): Promise<void> {
         is_distance_based: ex.isDistanceBased,
         notes: ex.notes,
         deleted_at: ex.deletedAt,
-      },
-      { onConflict: 'id' }
-    );
-    // custom_exercises' column-scoped UPDATE grant (§8.1) covers every
-    // column this payload writes except id/user_id/created_at (which never
-    // change here), so a whole-row upsert is safe — unlike user_consents.
-    if (error) {
-      await customExercisesRepository.markFailed(ex.id, error.message);
-    } else {
+      });
+      // 23505 = unique_violation: a retried push after a prior call that
+      // committed but whose response never arrived — treat as already-created.
+      if (error && error.code !== '23505') {
+        await customExercisesRepository.markFailed(ex.id, error.message);
+        continue;
+      }
       await customExercisesRepository.markSynced(ex.id);
+    } else {
+      const { error } = await supabase
+        .from('custom_exercises')
+        .update({
+          name: ex.name,
+          primary_muscle: ex.primaryMuscle,
+          equipment: ex.equipment,
+          is_weighted: ex.isWeighted,
+          is_bodyweight: ex.isBodyweight,
+          is_time_based: ex.isTimeBased,
+          is_distance_based: ex.isDistanceBased,
+          notes: ex.notes,
+          deleted_at: ex.deletedAt,
+        })
+        .eq('id', ex.id);
+      if (error) {
+        await customExercisesRepository.markFailed(ex.id, error.message);
+      } else {
+        await customExercisesRepository.markSynced(ex.id);
+      }
     }
   }
 }
@@ -340,15 +364,34 @@ export async function pullCustomExercises(userId: string): Promise<void> {
 export async function pushWorkoutTemplates(userId: string): Promise<void> {
   const unsynced = await workoutTemplatesRepository.getUnsynced(userId);
   for (const t of unsynced) {
-    const { error } = await supabase.from('workout_templates').upsert(
-      { id: t.id, user_id: t.userId, name: t.name, description: t.description, deleted_at: t.deletedAt },
-      { onConflict: 'id' }
-    );
-    if (error) {
-      await workoutTemplatesRepository.markFailed(t.id, error.message);
+    if (t.deletedAt && !t.serverConfirmed) {
+      await workoutTemplatesRepository.purgeLocalOnly(t.id);
       continue;
     }
-    await workoutTemplatesRepository.markSynced(t.id);
+
+    // See pushCustomExercises' doc comment — never `.upsert()` against a
+    // column-scoped UPDATE grant. workout_templates excludes id/user_id/
+    // created_at from UPDATE.
+    if (!t.serverConfirmed) {
+      const { error } = await supabase
+        .from('workout_templates')
+        .insert({ id: t.id, user_id: t.userId, name: t.name, description: t.description, deleted_at: t.deletedAt });
+      if (error && error.code !== '23505') {
+        await workoutTemplatesRepository.markFailed(t.id, error.message);
+        continue;
+      }
+      await workoutTemplatesRepository.markSynced(t.id);
+    } else {
+      const { error } = await supabase
+        .from('workout_templates')
+        .update({ name: t.name, description: t.description, deleted_at: t.deletedAt })
+        .eq('id', t.id);
+      if (error) {
+        await workoutTemplatesRepository.markFailed(t.id, error.message);
+        continue;
+      }
+      await workoutTemplatesRepository.markSynced(t.id);
+    }
 
     const pendingDeletes = await workoutTemplatesRepository.getPendingExerciseDeletes(t.id);
     for (const row of pendingDeletes) {
@@ -362,8 +405,13 @@ export async function pushWorkoutTemplates(userId: string): Promise<void> {
 
     const pendingExercises = await workoutTemplatesRepository.getUnsyncedExercises(t.id);
     for (const row of pendingExercises) {
-      const { error: exError } = await supabase.from('workout_template_exercises').upsert(
-        {
+      // workout_template_exercises' UPDATE grant excludes id/template_id/
+      // user_id AND exercise_id/custom_exercise_id (§8.1: "modeled as delete
+      // + re-insert") — an edit push must send ONLY the grantable mutable
+      // columns, never the identity/ref columns, so this can never be a
+      // single `.upsert()` either.
+      if (!row.serverConfirmed) {
+        const { error: exError } = await supabase.from('workout_template_exercises').insert({
           id: row.id,
           template_id: row.templateId,
           user_id: row.userId,
@@ -376,18 +424,30 @@ export async function pushWorkoutTemplates(userId: string): Promise<void> {
           target_weight_kg: row.targetWeightKg,
           target_rest_seconds: row.targetRestSeconds,
           notes: row.notes,
-        },
-        { onConflict: 'id' }
-      );
-      // workout_template_exercises' UPDATE grant excludes exercise_id/
-      // custom_exercise_id (§8.1: "modeled as delete + re-insert"), which is
-      // fine for a whole-row upsert on first INSERT (no conflict yet); an
-      // edit to an already-synced row only ever changes the granted mutable
-      // columns in this payload, so the upsert stays within grant on update too.
-      if (exError) {
-        await workoutTemplatesRepository.markExerciseFailed(row.id, exError.message);
-      } else {
+        });
+        if (exError && exError.code !== '23505') {
+          await workoutTemplatesRepository.markExerciseFailed(row.id, exError.message);
+          continue;
+        }
         await workoutTemplatesRepository.markExerciseSynced(row.id);
+      } else {
+        const { error: exError } = await supabase
+          .from('workout_template_exercises')
+          .update({
+            exercise_order: row.exerciseOrder,
+            target_sets: row.targetSets,
+            target_reps_low: row.targetRepsLow,
+            target_reps_high: row.targetRepsHigh,
+            target_weight_kg: row.targetWeightKg,
+            target_rest_seconds: row.targetRestSeconds,
+            notes: row.notes,
+          })
+          .eq('id', row.id);
+        if (exError) {
+          await workoutTemplatesRepository.markExerciseFailed(row.id, exError.message);
+        } else {
+          await workoutTemplatesRepository.markExerciseSynced(row.id);
+        }
       }
     }
   }
@@ -414,15 +474,34 @@ export async function pullWorkoutTemplates(userId: string): Promise<void> {
 export async function pushPrograms(userId: string): Promise<void> {
   const unsynced = await programsRepository.getUnsynced(userId);
   for (const p of unsynced) {
-    const { error } = await supabase.from('programs').upsert(
-      { id: p.id, user_id: p.userId, name: p.name, description: p.description, length_weeks: p.lengthWeeks, deleted_at: p.deletedAt },
-      { onConflict: 'id' }
-    );
-    if (error) {
-      await programsRepository.markFailed(p.id, error.message);
+    if (p.deletedAt && !p.serverConfirmed) {
+      await programsRepository.purgeLocalOnly(p.id);
       continue;
     }
-    await programsRepository.markSynced(p.id);
+
+    // See pushCustomExercises' doc comment — never `.upsert()` against a
+    // column-scoped UPDATE grant. programs excludes id/user_id/created_at
+    // from UPDATE.
+    if (!p.serverConfirmed) {
+      const { error } = await supabase
+        .from('programs')
+        .insert({ id: p.id, user_id: p.userId, name: p.name, description: p.description, length_weeks: p.lengthWeeks, deleted_at: p.deletedAt });
+      if (error && error.code !== '23505') {
+        await programsRepository.markFailed(p.id, error.message);
+        continue;
+      }
+      await programsRepository.markSynced(p.id);
+    } else {
+      const { error } = await supabase
+        .from('programs')
+        .update({ name: p.name, description: p.description, length_weeks: p.lengthWeeks, deleted_at: p.deletedAt })
+        .eq('id', p.id);
+      if (error) {
+        await programsRepository.markFailed(p.id, error.message);
+        continue;
+      }
+      await programsRepository.markSynced(p.id);
+    }
 
     const pendingWorkouts = await programsRepository.getUnsyncedWorkouts(p.id);
     for (const w of pendingWorkouts) {
@@ -435,14 +514,34 @@ export async function pushPrograms(userId: string): Promise<void> {
         }
         continue;
       }
-      const { error: wError } = await supabase.from('program_workouts').upsert(
-        { id: w.id, program_id: w.programId, user_id: w.userId, template_id: w.templateId, week_number: w.weekNumber, day_number: w.dayNumber, sort_order: w.sortOrder },
-        { onConflict: 'id' }
-      );
-      if (wError) {
-        await programsRepository.markWorkoutFailed(w.id, wError.message);
-      } else {
+      // program_workouts' UPDATE grant excludes id/program_id/user_id AND
+      // template_id (§8.1: "modeled as delete + re-insert") — same reasoning
+      // as workout_template_exercises, never a single `.upsert()`.
+      if (!w.serverConfirmed) {
+        const { error: wError } = await supabase.from('program_workouts').insert({
+          id: w.id,
+          program_id: w.programId,
+          user_id: w.userId,
+          template_id: w.templateId,
+          week_number: w.weekNumber,
+          day_number: w.dayNumber,
+          sort_order: w.sortOrder,
+        });
+        if (wError && wError.code !== '23505') {
+          await programsRepository.markWorkoutFailed(w.id, wError.message);
+          continue;
+        }
         await programsRepository.markWorkoutSynced(w.id);
+      } else {
+        const { error: wError } = await supabase
+          .from('program_workouts')
+          .update({ week_number: w.weekNumber, day_number: w.dayNumber, sort_order: w.sortOrder })
+          .eq('id', w.id);
+        if (wError) {
+          await programsRepository.markWorkoutFailed(w.id, wError.message);
+        } else {
+          await programsRepository.markWorkoutSynced(w.id);
+        }
       }
     }
   }
@@ -615,18 +714,35 @@ export async function pushBodyMeasurements(userId: string): Promise<void> {
     }
 
     if (!occasion.deletedAt) {
+      // NEVER `.upsert()` here — body_measurement_values' UPDATE grant is
+      // scoped to (value, unit_snapshot) only, excluding user_id and
+      // measurement_kind (§8.1 — immutable natural-key column). `user_id` is
+      // NOT part of the `onConflict` target, so PostgREST's generated
+      // `ON CONFLICT DO UPDATE SET` would include it — a column this
+      // grant never covers, failing at plan time on the very first insert.
+      // This child table has no local server-confirmed bookkeeping per value
+      // (unlike the five tables above), so first-vs-edit is determined the
+      // same way the parent occasion's own spine insert already does it in
+      // this file: try the INSERT, and treat a `23505` unique-violation
+      // (the (timeline_event_id, measurement_kind) natural key already
+      // exists — a retried push, or a genuine edit) as "fall through to a
+      // column-scoped UPDATE."
       for (const v of occasion.values) {
-        const { error: valError } = await supabase
+        const { error: insertError } = await supabase
           .from('body_measurement_values')
-          .upsert(
-            { timeline_event_id: occasion.id, user_id: occasion.userId, measurement_kind: v.measurementKind, value: v.value, unit_snapshot: v.unitSnapshot },
-            { onConflict: 'timeline_event_id,measurement_kind' }
-          );
-        // Grant excludes measurement_kind from UPDATE (§8.1 — immutable
-        // natural-key column), but a first insert has no conflict yet, and a
-        // later edit only ever changes value/unit_snapshot here, both granted.
-        if (valError) {
-          await bodyMeasurementsRepository.markFailed(occasion.id, valError.message);
+          .insert({ timeline_event_id: occasion.id, user_id: occasion.userId, measurement_kind: v.measurementKind, value: v.value, unit_snapshot: v.unitSnapshot });
+        if (!insertError) continue;
+        if (insertError.code !== '23505') {
+          await bodyMeasurementsRepository.markFailed(occasion.id, insertError.message);
+          continue;
+        }
+        const { error: updateError } = await supabase
+          .from('body_measurement_values')
+          .update({ value: v.value, unit_snapshot: v.unitSnapshot })
+          .eq('timeline_event_id', occasion.id)
+          .eq('measurement_kind', v.measurementKind);
+        if (updateError) {
+          await bodyMeasurementsRepository.markFailed(occasion.id, updateError.message);
         }
       }
     }
@@ -711,7 +827,12 @@ export async function pushProgressPhotos(userId: string): Promise<void> {
       });
       if (imgError && imgError.code !== '23505') {
         allUploaded = false;
-        await progressPhotosRepository.markFailed(occasion.id, imgError.message);
+        // CONSENT_REQUIRED_BODY_IMAGE surfaces here as a Postgres trigger
+        // error (42501) if body-image consent hasn't synced yet — mapped
+        // the same friendly way as the parent occasion insert above, rather
+        // than surfacing the raw Postgres error text to the user.
+        const message = imgError.code === '42501' ? 'Waiting for photo consent to sync first.' : imgError.message;
+        await progressPhotosRepository.markFailed(occasion.id, message);
       }
     }
 

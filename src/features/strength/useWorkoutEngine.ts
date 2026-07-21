@@ -17,9 +17,12 @@ import {
 import { estimateEpley1Rm, evaluateExerciseCandidates, type StrengthPrEvaluation } from './strengthPrEngine';
 import type {
   ExerciseFieldFlags,
+  LocalStrengthAchievement,
+  LocalStrengthRecord,
   LocalWorkoutSession,
   LocalWorkoutSet,
   MuscleGroup,
+  StrengthPrMetric,
   UnitWeightSnapshot,
   WorkoutSetType,
 } from '../../db/types';
@@ -112,6 +115,17 @@ export function useWorkoutEngine(params: { userId: string; unitWeight: UnitWeigh
   const [sets, setSets] = useState<LocalWorkoutSet[]>([]);
   const [previousSetsByRef, setPreviousSetsByRef] = useState<Map<string, LocalWorkoutSet[]>>(new Map());
   const [fieldFlagsByRef, setFieldFlagsByRef] = useState<Map<string, ExerciseFieldFlags>>(new Map());
+  // This session's confirmed-or-optimistic PR badges (design doc CORE-12 "the
+  // completion moment") — drives the LiftStack segment flare + inline SetRow
+  // "New best" PrBadge at every call site that renders this session's sets.
+  const [achievements, setAchievements] = useState<LocalStrengthAchievement[]>([]);
+  // The cached strength record each distinct exercise ref had the FIRST time
+  // it was seen THIS session — i.e. frozen at session-start (or first-add),
+  // deliberately never re-fetched after a PR updates the live cache. This is
+  // "the bar to rise past," not "today's most current number" — re-reading it
+  // after every completed set would make an already-beaten record's tick
+  // silently jump to the just-set new value instead of staying put.
+  const [prCacheByRef, setPrCacheByRef] = useState<Map<string, Map<StrengthPrMetric, LocalStrengthRecord>>>(new Map());
   const [restTimer, setRestTimer] = useState<RestTimerState>(IDLE_REST_STATE);
   const [autoRestEnabled, setAutoRestEnabled] = useState(true);
   const [tick, setTick] = useState(0);
@@ -125,6 +139,7 @@ export function useWorkoutEngine(params: { userId: string; unitWeight: UnitWeigh
   const refreshSets = useCallback(async (sessionId: string) => {
     const rows = await workoutSessionsRepository.getSetsForSession(sessionId);
     setSets(rows);
+    setAchievements(await strengthAchievementsRepository.getForSession(sessionId));
   }, []);
 
   /** Writes `rest_seconds_actual` onto the just-rested set once the timer stops (design doc §9.5), whether it ran to zero or was skipped early. Declared early (before the effects below reference it) — TS flags a `const` referenced-before-declaration even inside a deferred closure. */
@@ -226,6 +241,7 @@ export function useWorkoutEngine(params: { userId: string; unitWeight: UnitWeigh
     let cancelled = false;
     (async () => {
       const resolved = new Map<string, ExerciseFieldFlags>();
+      const resolvedPrCache = new Map<string, Map<StrengthPrMetric, LocalStrengthRecord>>();
       for (const [ref, { exerciseId, customExerciseId }] of distinctRefs) {
         if (exerciseId) {
           const ex = await exercisesRepository.getById(exerciseId);
@@ -234,6 +250,9 @@ export function useWorkoutEngine(params: { userId: string; unitWeight: UnitWeigh
           const ex = await customExercisesRepository.getById(customExerciseId);
           if (ex) resolved.set(ref, { isWeighted: ex.isWeighted, isBodyweight: ex.isBodyweight, isTimeBased: ex.isTimeBased, isDistanceBased: ex.isDistanceBased });
         }
+        // Snapshot each ref's cached record ONCE, the first time it's seen
+        // this session — see prCacheByRef's doc comment above.
+        resolvedPrCache.set(ref, await strengthRecordsRepository.getForExercise(userId, exerciseId, customExerciseId));
       }
       if (!cancelled && resolved.size > 0) {
         setFieldFlagsByRef((prev) => {
@@ -242,11 +261,18 @@ export function useWorkoutEngine(params: { userId: string; unitWeight: UnitWeigh
           return next;
         });
       }
+      if (!cancelled && resolvedPrCache.size > 0) {
+        setPrCacheByRef((prev) => {
+          const next = new Map(prev);
+          for (const [ref, cache] of resolvedPrCache) next.set(ref, cache);
+          return next;
+        });
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [sets, fieldFlagsByRef]);
+  }, [sets, fieldFlagsByRef, userId]);
 
   const start = useCallback(
     async (opts: { title?: string | null; sourceTemplateId?: string | null; templateNameSnapshot?: string | null; templateExercises?: ExercisePick[] } = {}) => {
@@ -588,12 +614,14 @@ export function useWorkoutEngine(params: { userId: string; unitWeight: UnitWeigh
 
       const a = sorted[index]!;
       const b = sorted[targetIndex]!;
-      for (const s of a.sets) {
-        await workoutSessionsRepository.upsertSet(s.id, session.id, session.userId, toWriteFields({ ...s, exerciseOrder: b.exerciseOrder }));
-      }
-      for (const s of b.sets) {
-        await workoutSessionsRepository.upsertSet(s.id, session.id, session.userId, toWriteFields({ ...s, exerciseOrder: a.exerciseOrder }));
-      }
+      // Both blocks' order swap in ONE transaction — an app kill between two
+      // separate writes here would otherwise leave both blocks sharing the
+      // same exercise_order (mobile-architecture-standards: durable writes,
+      // not partial ones).
+      await workoutSessionsRepository.upsertSetsBatch(session.id, session.userId, [
+        ...a.sets.map((s) => ({ id: s.id, fields: toWriteFields({ ...s, exerciseOrder: b.exerciseOrder }) })),
+        ...b.sets.map((s) => ({ id: s.id, fields: toWriteFields({ ...s, exerciseOrder: a.exerciseOrder }) })),
+      ]);
       await refreshSets(session.id);
     },
     [session, exerciseBlocks, refreshSets]
@@ -680,6 +708,8 @@ export function useWorkoutEngine(params: { userId: string; unitWeight: UnitWeigh
 
     session,
     exerciseBlocks,
+    achievements,
+    prCacheByRef,
     autoRestEnabled,
     setAutoRestEnabled,
     restTimer,

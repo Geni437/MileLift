@@ -9,6 +9,7 @@ import { SegmentedControl } from '../../../src/components/SegmentedControl';
 import { EmptyState } from '../../../src/components/EmptyState';
 import { PhotoTile } from '../../../src/components/strength/PhotoTile';
 import { progressPhotosRepository } from '../../../src/db/repositories/progressPhotosRepository';
+import { localPreferencesRepository } from '../../../src/db/repositories/localPreferencesRepository';
 import { formatRelativeDateTime } from '../../../src/lib/format';
 import { useAuth } from '../../../src/state/AuthContext';
 import type { LocalProgressPhoto, PhotoPose } from '../../../src/db/types';
@@ -22,10 +23,12 @@ export default function ProgressPhotosCompareScreen() {
   const [pose, setPose] = useState<PhotoPose>('front');
   const [leftIndex, setLeftIndex] = useState(1);
   const [rightIndex, setRightIndex] = useState(0);
+  const [alwaysReveal, setAlwaysReveal] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
     void progressPhotosRepository.listForUser(userId).then(setOccasions);
+    void localPreferencesRepository.get(userId).then((prefs) => setAlwaysReveal(prefs.photosAlwaysReveal));
   }, [userId]);
 
   const withPose = occasions.filter((o) => o.images.some((i) => i.pose === pose));
@@ -59,12 +62,14 @@ export default function ProgressPhotosCompareScreen() {
           <CompareColumn
             occasion={right}
             pose={pose}
+            alwaysReveal={alwaysReveal}
             onOlder={() => setRightIndex((i) => Math.min(withPose.length - 1, i + 1))}
             onNewer={() => setRightIndex((i) => Math.max(0, i - 1))}
           />
           <CompareColumn
             occasion={left}
             pose={pose}
+            alwaysReveal={alwaysReveal}
             onOlder={() => setLeftIndex((i) => Math.min(withPose.length - 1, i + 1))}
             onNewer={() => setLeftIndex((i) => Math.max(0, i - 1))}
           />
@@ -74,12 +79,24 @@ export default function ProgressPhotosCompareScreen() {
   );
 }
 
-function CompareColumn({ occasion, pose, onOlder, onNewer }: { occasion: LocalProgressPhoto | undefined; pose: PhotoPose; onOlder: () => void; onNewer: () => void }) {
+function CompareColumn({
+  occasion,
+  pose,
+  alwaysReveal,
+  onOlder,
+  onNewer,
+}: {
+  occasion: LocalProgressPhoto | undefined;
+  pose: PhotoPose;
+  alwaysReveal: boolean;
+  onOlder: () => void;
+  onNewer: () => void;
+}) {
   if (!occasion) return <View style={styles.column} />;
   const image = occasion.images.find((i) => i.pose === pose);
   return (
     <View style={styles.column}>
-      <PhotoTile uri={image?.localUri ?? null} label={pose} />
+      <PhotoTile uri={image?.localUri ?? null} label={pose} alwaysReveal={alwaysReveal} />
       <Text style={[theme.type.metricSm, theme.fontVariation.metric, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.6}>
         {formatRelativeDateTime(occasion.occurredAt)}
       </Text>

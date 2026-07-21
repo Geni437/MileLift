@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,6 +10,7 @@ import { SkeletonBlock } from '../../../src/components/SkeletonBlock';
 import { MuscleTag, EquipmentTag } from '../../../src/components/strength/MuscleTag';
 import { MeridianMark } from '../../../src/components/MeridianMark';
 import { exercisesRepository } from '../../../src/db/repositories/exercisesRepository';
+import { resolveExerciseMediaUrl } from '../../../src/lib/exerciseMedia';
 import type { LocalExercise, LocalExerciseMedia } from '../../../src/db/types';
 
 /** CORE-13 exercise detail: metadata, instructions, in-app attribution (the §6/§12.1 gate item), "Video coming soon" — never a player state (§2/§13). */
@@ -18,6 +19,7 @@ export default function ExerciseDetailScreen() {
   const [exercise, setExercise] = useState<LocalExercise | null>(null);
   const [media, setMedia] = useState<LocalExerciseMedia[]>([]);
   const [loading, setLoading] = useState(true);
+  const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -54,14 +56,32 @@ export default function ExerciseDetailScreen() {
   }
 
   const hasVideo = media.some((m) => m.mediaType === 'video');
+  // The primary image is the differentiator (design doc: "the real demo
+  // images are the differentiator, the layout stays quiet") —
+  // `MeridianMark:glyph` is reserved for genuinely missing/offline media,
+  // never the default look.
+  const primaryImage = media.find((m) => m.isPrimary && m.mediaType !== 'video') ?? media.find((m) => m.mediaType !== 'video');
+  const imageUrl = primaryImage ? resolveExerciseMediaUrl(primaryImage.urlOrObjectPath) : null;
+  const showImage = !!imageUrl && !imageFailed;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={[styles.imagePlaceholder, { backgroundColor: theme.color.bg.inset }]}>
-          <MeridianMark variant="glyph" size={56} />
+          {showImage ? (
+            <Image
+              source={{ uri: imageUrl! }}
+              style={styles.image}
+              resizeMode="cover"
+              onError={() => setImageFailed(true)}
+              accessibilityIgnoresInvertColors
+              accessibilityLabel={`${exercise.name} demonstration image`}
+            />
+          ) : (
+            <MeridianMark variant="glyph" size={56} />
+          )}
           {!hasVideo && (
-            <Text style={[theme.type.overline, styles.videoTag, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={1.8}>
+            <Text style={[theme.type.overline, styles.videoTag, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
               VIDEO COMING SOON
             </Text>
           )}
@@ -82,7 +102,8 @@ export default function ExerciseDetailScreen() {
         )}
 
         {exercise.attribution && (
-          <Text style={[theme.type.caption, { color: theme.color.text.tertiary }]} maxFontSizeMultiplier={2}>
+          // text.tertiary never clears AA at normal caption size (tokens.md "Contrast") — text.secondary.
+          <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
             {exercise.attribution}
           </Text>
         )}
@@ -103,7 +124,8 @@ export default function ExerciseDetailScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.color.bg.canvas },
   content: { padding: theme.screen.edge, gap: theme.space.md },
-  imagePlaceholder: { height: 220, borderRadius: theme.radius.lg, alignItems: 'center', justifyContent: 'center', gap: theme.space.sm },
+  imagePlaceholder: { height: 220, borderRadius: theme.radius.lg, alignItems: 'center', justifyContent: 'center', gap: theme.space.sm, overflow: 'hidden' },
+  image: { width: '100%', height: '100%', position: 'absolute' },
   videoTag: {},
   tagsRow: { flexDirection: 'row', gap: theme.space.xs },
 });

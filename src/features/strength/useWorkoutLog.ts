@@ -4,6 +4,7 @@ import { workoutSessionsRepository } from '../../db/repositories/workoutSessions
 import { strengthAchievementsRepository } from '../../db/repositories/strengthAchievementsRepository';
 import { weekKeyFor } from '../../lib/format';
 import { runSync } from '../../sync/syncEngine';
+import type { LiftStackSegment } from '../../components/strength/LiftStack';
 import type { LocalWorkoutSession } from '../../db/types';
 
 export type LoadState = 'loading' | 'empty' | 'ready' | 'error';
@@ -17,12 +18,18 @@ export type WorkoutWeekGroup = {
 
 const PAGE_SIZE = 20;
 
+/** No per-segment PR flare in the history-row micro thumbnail — `hasPr` is already surfaced separately via `WorkoutRow`'s own `PrBadge`, mirroring `ActivityRow`/`MeridianTrace:static`'s identical split. */
+function toMicroSegments(rows: { id: string; volume: number }[]): LiftStackSegment[] {
+  return rows.map((r) => ({ key: r.id, volume: r.volume, isPr: false }));
+}
+
 /** The Lift Log timeline (CORE-15's "Log" segment) — reads exclusively from the local `workout_sessions` mirror, grouped by week client-side, mirroring `useActivityLog`. */
 export function useWorkoutLog(userId: string | null) {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<LocalWorkoutSession[]>([]);
   const [prBySessionId, setPrBySessionId] = useState<Set<string>>(new Set());
+  const [segmentsBySessionId, setSegmentsBySessionId] = useState<Map<string, LiftStackSegment[]>>(new Map());
   const [nextCursor, setNextCursor] = useState<{ occurredAt: string; id: string } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -40,6 +47,8 @@ export function useWorkoutLog(userId: string | null) {
       setNextCursor(page.nextCursor);
       const prSet = await strengthAchievementsRepository.getForSessions(page.items.map((s) => s.id));
       setPrBySessionId(prSet);
+      const volumesById = await workoutSessionsRepository.getWorkingSetVolumesForSessions(page.items.map((s) => s.id));
+      setSegmentsBySessionId(new Map(Array.from(volumesById, ([id, rows]) => [id, toMicroSegments(rows)])));
       setLoadState(page.items.length === 0 ? 'empty' : 'ready');
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not load your training log.');
@@ -61,6 +70,18 @@ export function useWorkoutLog(userId: string | null) {
       setNextCursor(page.nextCursor);
       const newlyHasPr = await strengthAchievementsRepository.getForSessions(page.items.map((s) => s.id));
       setPrBySessionId((prev) => new Set([...prev, ...newlyHasPr]));
+      const newVolumesById = await workoutSessionsRepository.getWorkingSetVolumesForSessions(page.items.map((s) => s.id));
+      setSegmentsBySessionId((prev) => {
+        const next = new Map(prev);
+        for (const [id, rows] of newVolumesById) next.set(id, toMicroSegments(rows));
+        return next;
+      });
+    } catch (err) {
+      // Mirrors loadInitial's error surfacing — a failed "load more" page is
+      // a real failure, not a silent no-op (production-standards: no
+      // swallowed exceptions on a user-visible action).
+      setLoadError(err instanceof Error ? err.message : 'Could not load more of your training log.');
+      setLoadState('error');
     } finally {
       setLoadingMore(false);
     }
@@ -101,6 +122,7 @@ export function useWorkoutLog(userId: string | null) {
     loadError,
     weeks,
     prBySessionId,
+    segmentsBySessionId,
     hasMore: !!nextCursor,
     loadingMore,
     refreshing,
