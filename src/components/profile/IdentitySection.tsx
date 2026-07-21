@@ -12,6 +12,7 @@ type Props = {
   profile: LocalProfile;
   email: string | null;
   onSave: (fields: { displayName?: string | null; username?: string | null }) => Promise<void>;
+  onRetrySync: () => void;
 };
 
 /**
@@ -23,7 +24,7 @@ type Props = {
  * timeline_events). Rather than fake an upload against a bucket that
  * doesn't exist, tapping the avatar says so honestly.
  */
-export function IdentitySection({ profile, email, onSave }: Props) {
+export function IdentitySection({ profile, email, onSave, onRetrySync }: Props) {
   const [displayName, setDisplayName] = useState(profile.displayName ?? '');
   const [username, setUsername] = useState(profile.username ?? '');
 
@@ -64,7 +65,7 @@ export function IdentitySection({ profile, email, onSave }: Props) {
             {profile.username ? `@${profile.username}` : 'No username yet'}
           </Text>
         </View>
-        <SyncStatusPill status={profile.syncStatus} onRetry={() => void runSync('manual')} />
+        <SyncStatusPill status={profile.syncStatus} onRetry={onRetrySync} />
       </View>
 
       <Field label="Display name" value={displayName} onChangeText={setDisplayName} onBlur={handleDisplayNameBlur} autoCapitalize="words" />

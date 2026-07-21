@@ -62,7 +62,12 @@ export default function ProfileScreen() {
     <Screen contentStyle={styles.content}>
       <Text style={[theme.type.displayMd, { color: theme.color.text.primary }]}>Profile</Text>
 
-      <IdentitySection profile={profile} email={email} onSave={updateProfile} />
+      <IdentitySection
+        profile={profile}
+        email={email}
+        onSave={updateProfile}
+        onRetrySync={() => void runSync('manual').then(refresh)}
+      />
 
       <TrainingBalanceSection trainingBalanceRun={preferences?.trainingBalanceRun ?? 50} onChange={setTrainingBalance} />
 
