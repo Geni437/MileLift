@@ -2,7 +2,9 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "types": ["jest"]
+    "types": [
+      "jest"
+    ]
   },
   "exclude": [
     "node_modules",
@@ -12,5 +14,11 @@
     "android",
     "ios",
     "supabase/functions"
+  ],
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
   ]
 }

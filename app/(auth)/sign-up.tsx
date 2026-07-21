@@ -14,7 +14,7 @@ import { useAuth } from '../../src/state/AuthContext';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import type { AuthErrorResult } from '../../src/lib/authErrors';
 
-const MIN_PASSWORD_LENGTH = 8;
+const MIN_PASSWORD_LENGTH = 12;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type ScreenState =
@@ -156,6 +156,12 @@ function ServerErrorBanner({ error }: { error: AuthErrorResult }) {
   if (error.kind === 'email_in_use') return null; // shown as a field error instead
   if (error.kind === 'network_offline') {
     return <InlineBanner tone="warning" message="You're offline. Check your connection and try again." />;
+  }
+  if (error.kind === 'weak_password') {
+    return <InlineBanner tone="danger" message={`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`} />;
+  }
+  if (error.kind === 'rate_limited') {
+    return <InlineBanner tone="danger" message="Too many attempts. Wait a moment and try again." />;
   }
   return <InlineBanner tone="danger" message="Something went wrong on our end. Try again in a moment." />;
 }

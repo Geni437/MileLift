@@ -26,6 +26,9 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
 }
 
 async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
+  // journal_mode is a connection-level pragma and cannot be changed inside a
+  // transaction, so it runs before withTransactionAsync starts one.
+  await db.execAsync(`PRAGMA journal_mode = WAL;`);
   await db.withTransactionAsync(async () => {
     for (const statement of SCHEMA_STATEMENTS) {
       await db.execAsync(statement);

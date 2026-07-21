@@ -21,8 +21,6 @@
  */
 
 export const SCHEMA_STATEMENTS: string[] = [
-  `PRAGMA journal_mode = WAL;`,
-
   `CREATE TABLE IF NOT EXISTS profiles (
     id TEXT PRIMARY KEY NOT NULL,
     username TEXT,
