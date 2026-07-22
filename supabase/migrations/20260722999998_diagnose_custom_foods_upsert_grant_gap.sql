@@ -1,0 +1,43 @@
+-- =============================================================================
+-- Phase 3 — Module B: live diagnostic that went wrong — see
+-- 20260722999999_revert_custom_foods_diagnostic_grant.sql for the fix.
+--
+-- HISTORY NOTE (kept, not deleted, per this project's "never edit an
+-- already-applied migration away" convention): this migration was
+-- originally authored as a throwaway `do $$ ... raise exception '...' $$`
+-- diagnostic (the project's established pattern for live-inspecting ACL
+-- state without leaving a permanent trace) to test a hypothesis about why
+-- `.upsert()` against custom_foods was failing even when restricted to
+-- already-granted mutable columns. It was authored WITHOUT the
+-- always-fails wrapper by mistake, so it applied for real: it granted
+-- `UPDATE (id)` on public.custom_foods to authenticated — a genuine mistake,
+-- since `id` is this table's immutable identity column and must never be
+-- client-updatable (§8.1). This file is kept, rather than deleted, so the
+-- local migration list matches what was actually recorded as applied on the
+-- remote project (deleting it would create silent drift between local files
+-- and remote history, which is worse than keeping an honest record of a
+-- mistake that was immediately caught and reverted).
+--
+-- WHAT IT PROVED (valuable, kept intentionally): granting UPDATE(id) made
+-- the original "permission denied for table custom_foods" privilege error
+-- disappear on a `.upsert({id, notes})` call, replacing it with a DIFFERENT
+-- error (an RLS INSERT-policy violation on the notional proposed-insert row,
+-- since `user_id` was absent from that payload). This conclusively confirms:
+-- PostgREST's `.upsert()` ALWAYS includes the conflict-target column (`id`)
+-- in the `ON CONFLICT DO UPDATE SET` list whenever it is present in the
+-- payload -- which it always must be, for the upsert to target a specific
+-- existing row. Combined with Postgres evaluating the INSERT policy's
+-- `WITH CHECK` against the notional proposed row for ANY `INSERT ... ON
+-- CONFLICT DO UPDATE` (regardless of whether a real conflict occurs), this
+-- means `.upsert()` can never safely edit an existing row on any table in
+-- this project with a client-generated/immutable PK excluded from its
+-- UPDATE grant -- which is every owner-scoped table here, by design. See
+-- 20260722999999_revert_custom_foods_diagnostic_grant.sql for the revert and
+-- the task report for the full corrected §8.1 guidance this produced.
+--
+-- The grant this file issued is REVOKED by the very next migration
+-- (20260722999999). Do not treat the `grant update (id) ...` line below as
+-- live/intended state -- it is not, as of that follow-up migration.
+-- =============================================================================
+
+grant update (id) on public.custom_foods to authenticated;

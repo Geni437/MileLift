@@ -1,0 +1,15 @@
+-- Rollback for 20260722110000_enable_pg_trgm.sql
+--
+-- NOT dropped by default: 20260722110100_create_food_search_index_and_rpcs.sql
+-- creates a GIN index using pg_trgm's operator class, so this extension must
+-- stay installed as long as that index/migration is applied. Roll back
+-- 20260722110100 FIRST, then this script becomes safe to run.
+--
+-- `drop extension if exists pg_trgm;` is intentionally NOT issued
+-- unconditionally here -- if some other future object also depends on
+-- pg_trgm by the time this is run, an unconditional drop would either fail
+-- loudly (safe) or, with CASCADE, silently take that object down too
+-- (unsafe). Uncomment the line below only after confirming no other object
+-- in the database depends on pg_trgm.
+--
+-- drop extension if exists pg_trgm;

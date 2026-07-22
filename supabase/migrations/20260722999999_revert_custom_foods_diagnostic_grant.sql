@@ -1,0 +1,103 @@
+-- =============================================================================
+-- Phase 3 — Module B: revert the accidental UPDATE(id) grant on custom_foods
+-- Fixes: 20260722999998_diagnose_custom_foods_upsert_grant_gap.sql
+--
+-- Per this project's migration convention (see
+-- 20260721110200_fix_strength_records_grant_mismatch.sql's header): an
+-- already-applied migration is never edited in place -- this is a new,
+-- additive corrective migration.
+--
+-- =============================================================================
+-- WHAT HAPPENED
+-- =============================================================================
+-- 20260722999998 was meant to be a throwaway, always-fails
+-- `do $$ ... raise exception '...' $$` diagnostic (this project's
+-- established pattern for live-inspecting ACL state without leaving a
+-- permanent trace -- see e.g. the grant-report technique used earlier in
+-- this same task). It was written WITHOUT the always-fails wrapper by
+-- mistake and applied for real, granting `UPDATE (id)` on
+-- public.custom_foods to authenticated. `id` is that table's immutable,
+-- client-generated identity column and must never be client-updatable --
+-- letting authenticated update it would let a caller repoint an existing
+-- custom_foods row's identity, which is exactly the kind of immutable-
+-- column exposure §8.1 exists to prevent. This is fixed here, immediately
+-- upon discovery, rather than left live.
+--
+-- =============================================================================
+-- WHAT THE (now-reverted) EXPERIMENT PROVED — corrected §8.1 guidance
+-- =============================================================================
+-- The experiment was not wasted: it conclusively resolved an ambiguity in
+-- this project's own recurring-bug narrative. Live-testing `.upsert({id,
+-- notes})` against custom_foods (where `notes` IS a granted mutable column
+-- and `id` is the row's existing PK, i.e. a genuine update, not an insert)
+-- FAILED with "permission denied for table custom_foods" / hint "GRANT
+-- UPDATE ON public.custom_foods" -- even though the SET-worthy column
+-- (`notes`) was fully granted. Temporarily granting UPDATE(id) made that
+-- specific error disappear, replaced by a DIFFERENT failure (an RLS
+-- INSERT-policy violation on the notional proposed-insert row, because
+-- `user_id` was absent from that minimal payload). Together these prove:
+--
+--   1. PostgREST's `.upsert()` ALWAYS includes the conflict-target column
+--      (here, `id`) in the `ON CONFLICT DO UPDATE SET` list whenever it is
+--      present in the payload -- which it always must be, since the
+--      upsert needs `id` to know which row to conflict against. Because
+--      `id` (correctly) never carries an UPDATE grant on any table in this
+--      project, this means: for the SET-list privilege check ALONE,
+--      **`.upsert()` can never succeed against an EXISTING row on any table
+--      with a column-scoped UPDATE grant that excludes its own PK/identity
+--      column** -- restricting the payload to "only mutable columns plus
+--      the id" is NOT sufficient, because `id` itself becomes a SET target
+--      purely by being present in the payload.
+--   2. Independently, Postgres evaluates the INSERT policy's WITH CHECK
+--      against the notional proposed-insert row for ANY
+--      `INSERT ... ON CONFLICT DO UPDATE`, REGARDLESS of whether a real
+--      conflict occurs and the UPDATE branch is what actually executes. A
+--      payload that omits `user_id` (or any other NOT NULL/ownership
+--      column) fails this check even when the row already exists and only
+--      a mutable field is genuinely changing.
+--
+-- CORRECTED CLIENT-WRITE GUIDANCE (supersedes any narrower "restrict the
+-- upsert payload to mutable columns" phrasing elsewhere in this project's
+-- migrations, which is necessary but NOT sufficient): against every table
+-- in this project with a column-scoped UPDATE grant (i.e. essentially every
+-- owner-scoped table, per §8.1's design) --
+--   - A brand-new row: plain `.insert(fullRow)` -- works, INSERT is
+--     unrestricted/table-wide.
+--   - Editing an EXISTING row: plain `.update({ mutableColsOnly })
+--     .eq('id', x)` -- a real UPDATE statement, never `.upsert()`. This is
+--     the ONLY client-safe edit path.
+--   - True insert-or-update sync semantics where the client does not know
+--     whether the row already exists (the offline-idempotent-retry case
+--     these tables are designed for): a two-step client pattern -- attempt
+--     `.insert(fullRow)`; on a 23505 unique-violation/conflict response,
+--     fall back to `.update({ mutableColsOnly }).eq('id', x)`. This is safe
+--     under retry because writes are always scoped to a single
+--     client-generated `id` under owner-only RLS.
+--   - The transactional multi-table save RPCs (e.g.
+--     save_workout_session_v1) remain correct as written: they supply
+--     REAL, correct values for every NOT NULL/ownership column in the
+--     INSERT list (so the notional-insert WITH CHECK always passes) and
+--     restrict the `ON CONFLICT DO UPDATE SET` list to the same granted
+--     mutable columns (so the SET-list privilege check always passes) --
+--     this dual discipline is why that pattern has verified live correctly
+--     while a bare client `.upsert()` cannot.
+--
+-- This corrected guidance is reflected in the task report and should be
+-- treated as the authoritative statement of the §8.1 upsert hazard for
+-- Module B going forward, superseding the narrower phrasing.
+--
+-- Live re-verified after this fix: scripts/verify-nutrition-schema.mjs
+-- (updated to demonstrate the corrected two-step pattern rather than the
+-- disproven "upsert restricted to mutable columns alone is sufficient"
+-- assumption) passes every case, including the naive-whole-row-upsert
+-- rejection and the targeted-update/two-step-insert-then-update success
+-- paths, against the UNMODIFIED (correctly narrow) custom_foods grant list
+-- from 20260722100400_create_custom_foods.sql.
+--
+-- ROLLBACK: see supabase/migrations/rollbacks/20260722999999_revert_custom_foods_diagnostic_grant.sql
+-- (re-applies the UPDATE(id) grant this migration removes -- exists for
+-- convention-consistency only; there is no scenario where re-granting it is
+-- correct).
+-- =============================================================================
+
+revoke update (id) on public.custom_foods from authenticated;
