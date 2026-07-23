@@ -194,6 +194,29 @@ const darkColor = {
     ending: palette.gold[500], // final ~10s (= feedback.warning)
     done: palette.growth[500], // rest complete (= accent.growth)
   },
+  // Energy balance — the CORE-08/11 daily energy ledger (Phase 3, Module B). A
+  // semantic ALIAS group (NOT a new hue), added for the exact reason color.map
+  // and color.restTimer were: the MeridianBalance signature component references
+  // named state-roles instead of raw palette values, and the in/out/net mapping
+  // is a real design decision worth freezing so a builder never guesses whether
+  // "intake" is ember or growth. This is the Meridian's ORIGIN made a working
+  // instrument (Phase 1 lit the horizontal Mile axis, Phase 2 the vertical Lift
+  // axis, Phase 3 lights the shared origin where they meet). Food is energy IN,
+  // so it is ember (accent.primary — the "activity & energy" role, here energy
+  // taken in); measured expenditure is cyan (accent.data — telemetry/accuracy,
+  // here energy measured leaving); the net pivot is the Meridian origin itself
+  // (text.primary). Macro composition of intake reuses `intake` (ember) — macros
+  // ARE the intake, itemized. Deliberately NO surplus/deficit color: net sign is
+  // carried by the signed metric-face number + which side the origin rests, never
+  // a value-laden good/bad hue (there is no goal model in Phase 3 to judge against
+  // — §12 decision 5). Rationale: tokens.md §2.3. No new color family.
+  energyBalance: {
+    track: palette.graphite[800], // the beam's neutral ground (= bg.inset)
+    intake: palette.ember[500], // energy in / food (= accent.primary); also macro-bar fill
+    expenditure: palette.cyan[500], // measured energy out / burn (= accent.data)
+    origin: palette.graphite[50], // the net pivot = the Meridian origin (= text.primary)
+    water: palette.cyan[400], // the day's hydration accretion — cyan (fluid/telemetry), NOT energy, kept off the ember/cyan energy beam
+  },
   // Focus ring is intentionally cyan, NOT the ember CTA color, so a focused
   // primary button still shows a visible ring distinct from its own fill.
   focusRing: palette.cyan[400],
@@ -270,6 +293,13 @@ const lightColor: Widen<typeof darkColor> = {
     fill: palette.cyan[600],
     ending: palette.gold[600],
     done: palette.growth[600],
+  },
+  energyBalance: {
+    track: palette.graphite[50],
+    intake: palette.ember[600],
+    expenditure: palette.cyan[600],
+    origin: palette.graphite[900],
+    water: palette.cyan[600],
   },
   focusRing: palette.cyan[600],
 };

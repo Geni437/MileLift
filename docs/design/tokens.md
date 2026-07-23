@@ -128,6 +128,43 @@ whose state-to-role mapping is a real design decision worth naming and freezing,
 The countdown itself carries a non-color signal at every state (the numeric readout
 in the metric face + a text label "Rest" / "Rest done"), never color alone.
 
+### 2.3 `color.energyBalance` — the daily energy ledger (added Phase 3, CORE-08/11)
+The nutrition module's signature surface (screens-phase-3.md §0/§CORE-08) is the
+**MeridianBalance**: the Meridian's *origin* — the point where the horizontal Mile
+axis and the vertical Lift axis meet — made a working instrument, the way Phase 1
+made the horizontal axis live (`MeridianTrace`) and Phase 2 made the vertical axis
+live (`LiftStack`). It gets a **first-class, named treatment** — but, exactly like
+`color.map` and `color.restTimer`, it is a **semantic alias group, not a new hue**.
+It exists so the component references named *energy-role* values rather than raw
+palette entries, and so the in / out / net mapping is decided here once.
+
+| Token | Value | Meaning |
+| --- | --- | --- |
+| `energyBalance.track` | `bg.inset` (graphite) | The beam's neutral ground — not a brand color. |
+| `energyBalance.intake` | `accent.primary` (ember) | **Energy in (food).** Ember's role is "activity & energy"; food is energy taken in, so intake is literally the energy color — the single most on-thesis reuse here, the nutrition counterpart to "a route IS ember because it's the Mile drawn on the earth" (§2.1). Also the fill of the macro-composition bars: macros *are* the intake, itemized. |
+| `energyBalance.expenditure` | `accent.data` (cyan) | **Measured energy out (burn).** Cyan is trust/telemetry/accuracy; a calories-out figure is a measured/estimated quantity, and the day's biggest expenditure contributor (a lift) is already cyan. The Meridian's warm↔cool duality maps onto energy's own duality: **in (warm) ↔ out (cool), meeting at the origin.** |
+| `energyBalance.origin` | `text.primary` | **The net pivot** = the Meridian origin ("where you are right now"). Where it rests between the warm and cool masses is the day's net. |
+| `energyBalance.water` | `cyan[400]` | The day's hydration accretion (CORE-09). Cyan (fluid/telemetry), deliberately **not** on the ember/cyan *energy* beam — water carries no `energy_kcal` (§1.7), so it must read as a separate quantity, never as intake or burn. |
+
+**Why no surplus/deficit color, and no goal marker.** The reflex is green-surplus /
+red-deficit and a goal line on the beam. We deliberately add **neither**: (a) net
+sign is carried by the **signed metric-face number** + which side the origin rests,
+never a value-laden hue — a surplus isn't "bad" and a deficit isn't "good" without a
+goal to judge against; (b) Phase 3 has **no goal/target model** (architecture §12
+decision 5), so a target marker on the beam would imply a "remaining vs. goal"
+mechanic that does not exist — the same honesty as Phase 2's program builder being a
+list, not a calendar, because there is no scheduler yet. The beam shows **net
+actuals**, and says so.
+
+**Why this is not overreach.** No new color family — all five roles map to existing
+tokens (inset / ember / cyan / text.primary). It is added, over referencing those
+roles inline, for the identical reason `color.map` and `color.restTimer` were: a
+defining component whose role mapping is a real, freeze-worthy decision, so
+`design-reviewer` can see intake was *chosen* ember, not defaulted to green. The
+balance carries non-color signals at every state (the signed net in the metric face,
+"in" / "out" / "net" labels, and per-line provenance tags in the expenditure
+breakdown), never color alone.
+
 ### Meaning-level color rules (so color is never decorative)
 - **Ember is spent, not sprinkled.** It marks the one primary action on a screen
   and activity/energy data. If two things on a screen are ember, one of them is
@@ -265,6 +302,13 @@ Named so `design-reviewer` can tell a deliberate choice from a default:
   screen spec).
 - **No uniform rounded-shadow box for every content type** — radii and elevation
   are role-assigned.
+- **No calorie/macro progress ring, and no three arbitrarily-colored macro
+  rings/donuts** (Phase 3, the nutrition category's single most-copied cliché) —
+  replaced by the **MeridianBalance** (calories in/out/net as the origin balancing
+  between warm intake and cool expenditure) and a **monochrome horizontal
+  macro-distribution breakdown** (P/C/F length-encoded in the ember intake family,
+  the numbers doing the work in the metric face — a distribution is horizontal bars,
+  the same rule Phase 2 set for muscle volume). See screens-phase-3.md §0.
 
 ---
 

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MileLift — Phase 3 · Food › Today (MeridianBalance mockup)</title>
+<!--
+  Static, framework-independent proof of the Phase 3 nutrition signature — the
+  MeridianBalance (the energy ORIGIN made a working instrument) — plus the
+  monochrome macro breakdown, the CORE-11 expenditure provenance list, and the
+  water strip. Real token values from docs/design/theme.ts (dark theme).
+
+  This is a design artifact for design-reviewer / the person to sanity-check
+  the signature is distinctive (not a reskinned calorie ring), NOT the mobile
+  implementation. Data is a representative example day.
+
+  Fonts: JetBrains Mono (metric face), Inter (body), Archivo (display) via
+  Google Fonts CDN — the same families theme.ts loads via @expo-google-fonts.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* --- palette / semantic tokens (theme.ts dark) --- */
+    --bg-canvas:#0B0F16; --bg-surface:#0F141D; --bg-raised:#131A24; --bg-inset:#19212D;
+    --border-subtle:#212B39; --border-default:#2B3646; --border-strong:#3A4657;
+    --text-primary:#EEF1F6; --text-secondary:#8B97A7; --text-tertiary:#697687;
+    --ember:#F5871F; --ember-tint:rgba(245,135,31,0.12);
+    --cyan:#38A9C9; --cyan-400:#5DC1DC; --cyan-tint:rgba(56,169,201,0.14);
+    --growth:#2FC978; --gold:#F5B830; --gold-tint:rgba(245,184,48,0.14);
+    /* energyBalance alias group (Phase 3) */
+    --eb-track:#19212D; --eb-intake:#F5871F; --eb-expenditure:#38A9C9; --eb-origin:#EEF1F6; --eb-water:#5DC1DC;
+    --radius-lg:14px; --radius-xl:20px; --radius-pill:999px; --radius-sm:6px;
+    --edge:16px;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:#05070b; color:var(--text-primary); font-family:'Inter',system-ui,sans-serif;
+    display:flex; justify-content:center; padding:24px 12px; -webkit-font-smoothing:antialiased; }
+  .phone { width:390px; background:var(--bg-canvas); border-radius:36px; overflow:hidden;
+    border:1px solid var(--border-subtle); box-shadow:0 24px 80px rgba(0,0,0,.6); }
+  .metric { font-family:'JetBrains Mono',monospace; font-variant-numeric:tabular-nums; }
+  .display { font-family:'Archivo',sans-serif; font-weight:700; font-stretch:125%; letter-spacing:-.3px; }
+  .overline { font-family:'Inter'; font-weight:600; font-size:11px; letter-spacing:1.2px;
+    text-transform:uppercase; color:var(--text-secondary); }
+
+  /* --- top bar / tabs header --- */
+  .statusbar { height:44px; display:flex; align-items:flex-end; justify-content:space-between;
+    padding:0 20px 6px; }
+  .statusbar .metric { font-size:14px; color:var(--text-primary); }
+  .statusbar .dots { color:var(--text-secondary); font-size:13px; letter-spacing:2px; }
+  .header { padding:8px var(--edge) 4px; }
+  .header h1 { font-size:22px; }
+  .seg { display:flex; background:var(--bg-inset); border-radius:var(--radius-pill); padding:3px;
+    margin:14px 0 6px; }
+  .seg button { flex:1; border:0; background:transparent; color:var(--text-secondary);
+    font-family:'Inter'; font-weight:600; font-size:14px; padding:8px 0; border-radius:var(--radius-pill); cursor:default; }
+  .seg button.active { background:var(--bg-raised); color:var(--text-primary); }
+
+  .scroll { padding:6px var(--edge) 90px; }
+  .card { background:var(--bg-raised); border:1px solid var(--border-subtle);
+    border-radius:var(--radius-lg); padding:16px; margin-top:14px; }
+
+  /* ===== MeridianBalance (the signature) ===== */
+  .balance-head { display:flex; justify-content:space-between; align-items:baseline; }
+  .balance-head .net-label { font-size:13px; color:var(--text-secondary); }
+  .net { text-align:right; }
+  .net .val { font-family:'JetBrains Mono'; font-weight:700; font-size:28px; color:var(--text-primary); font-variant-numeric:tabular-nums; }
+  .net .unit { font-size:12px; color:var(--text-secondary); margin-left:3px; }
+
+  .beam-wrap { position:relative; height:78px; margin:18px 2px 6px; }
+  /* the neutral ground line */
+  .beam-baseline { position:absolute; top:50%; left:0; right:0; height:2px; background:var(--eb-track); border-radius:2px; }
+  /* intake mass (warm, left of origin) and expenditure mass (cool, right) */
+  .beam-mass { position:absolute; top:50%; transform:translateY(-50%); height:20px; border-radius:6px; }
+  .beam-intake { right:50%; background:linear-gradient(90deg, rgba(245,135,31,.35), var(--eb-intake));
+    box-shadow:0 0 18px rgba(245,135,31,.28); }
+  .beam-exp { left:50%; background:linear-gradient(90deg, var(--eb-expenditure), rgba(56,169,201,.35));
+    box-shadow:0 0 16px rgba(56,169,201,.24); }
+  /* the Meridian origin dot — the pivot; its offset from center is the net */
+  .origin { position:absolute; top:50%; height:34px; width:34px; border-radius:50%;
+    background:var(--bg-canvas); border:2px solid var(--eb-origin);
+    box-shadow:0 0 0 5px var(--bg-canvas), 0 6px 16px rgba(0,0,0,.5);
+    display:flex; align-items:center; justify-content:center; }
+  .origin::before { content:''; width:8px; height:8px; border-radius:50%; background:var(--eb-origin); }
+  /* vertical Lift-axis stub through the origin, so the mark reads as the Meridian origin, not a slider knob */
+  .origin-riser { position:absolute; top:50%; width:2px; height:30px; transform:translate(-50%,-50%);
+    background:linear-gradient(180deg, var(--eb-expenditure), transparent); opacity:.55; }
+  .beam-ends { display:flex; justify-content:space-between; margin-top:10px; }
+  .beam-end { display:flex; flex-direction:column; gap:2px; }
+  .beam-end.out { text-align:right; }
+  .beam-end .v { font-family:'JetBrains Mono'; font-weight:700; font-size:17px; }
+  .beam-end.in .v { color:var(--ember); } .beam-end.out .v { color:var(--cyan); }
+  .beam-note { font-size:12px; color:var(--text-secondary); margin-top:12px; line-height:16px; }
+
+  /* ===== Macro breakdown (monochrome, horizontal, NOT rings) ===== */
+  .macro { margin-top:14px; }
+  .macro-row { display:grid; grid-template-columns:64px 1fr 64px; align-items:center; gap:10px; margin:11px 0; }
+  .macro-row .lab { font-size:11px; }
+  .macro-track { height:8px; background:var(--bg-inset); border-radius:var(--radius-pill); overflow:hidden; }
+  .macro-fill { height:100%; background:var(--eb-intake); border-radius:var(--radius-pill); }
+  .macro-val { font-family:'JetBrains Mono'; font-weight:500; font-size:14px; text-align:right; color:var(--text-primary); }
+  .macro-val small { color:var(--text-secondary); font-size:11px; }
+
+  /* ===== Expenditure provenance (CORE-11) ===== */
+  .exp-head { display:flex; justify-content:space-between; align-items:center; }
+  .exp-row { display:flex; align-items:center; gap:12px; padding:11px 0; border-top:1px solid var(--border-subtle); }
+  .exp-row:first-of-type { border-top:0; }
+  .tag { font-family:'Inter'; font-weight:600; font-size:10px; letter-spacing:1px; text-transform:uppercase;
+    padding:4px 8px; border-radius:var(--radius-sm); background:var(--bg-inset); color:var(--text-secondary);
+    white-space:nowrap; }
+  .tag.run { color:var(--ember); } .tag.lift { color:var(--cyan); }
+  .exp-row .name { flex:1; font-size:14px; color:var(--text-primary); }
+  .exp-row .name .sub { display:block; font-size:12px; color:var(--text-secondary); }
+  .exp-row .kcal { font-family:'JetBrains Mono'; font-weight:700; font-size:15px; color:var(--text-primary); }
+  .chev { color:var(--text-tertiary); font-size:16px; }
+
+  /* ===== Water strip ===== */
+  .water-top { display:flex; justify-content:space-between; align-items:baseline; }
+  .water-total { font-family:'JetBrains Mono'; font-weight:700; font-size:17px; color:var(--text-primary); }
+  .water-total small { color:var(--text-secondary); font-size:12px; font-weight:500; }
+  .water-accr { height:8px; background:var(--bg-inset); border-radius:var(--radius-pill); overflow:hidden; margin:12px 0 14px; }
+  .water-accr > span { display:block; height:100%; background:var(--eb-water); border-radius:var(--radius-pill); }
+  .chips { display:flex; gap:8px; }
+  .chip { flex:1; text-align:center; padding:10px 0; border-radius:var(--radius-pill); background:var(--bg-inset);
+    border:1px solid var(--border-subtle); font-family:'JetBrains Mono'; font-weight:500; font-size:13px; color:var(--text-primary); }
+  .chip.custom { font-family:'Inter'; font-weight:600; color:var(--text-secondary); }
+
+  /* ===== Meal cards ===== */
+  .meal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .meal-head .mt { font-size:15px; font-weight:600; }
+  .meal-head .mtot { font-family:'JetBrains Mono'; font-weight:700; font-size:14px; }
+  .item { display:flex; justify-content:space-between; gap:10px; padding:9px 0; border-top:1px solid var(--border-subtle); }
+  .item .nm { font-size:14px; } .item .nm .sv { display:block; font-family:'JetBrains Mono'; font-size:12px; color:var(--text-secondary); }
+  .item .ik { font-family:'JetBrains Mono'; font-weight:700; font-size:14px; }
+  .src { font-size:10px; letter-spacing:.8px; text-transform:uppercase; color:var(--text-secondary); margin-left:6px; }
+  .pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--text-secondary);
+    background:var(--bg-inset); border-radius:var(--radius-pill); padding:3px 9px; }
+  .pill .dot { width:6px; height:6px; border-radius:50%; background:var(--text-secondary); }
+  .pill.synced { color:var(--growth); } .pill.synced .dot { background:var(--growth); }
+  .addfood { margin-top:8px; color:var(--cyan); font-weight:600; font-size:13px; }
+
+  .sect-label { margin:20px 2px 2px; }
+
+  /* FAB */
+  .fab { position:absolute; right:20px; bottom:26px; width:60px; height:60px; border-radius:50%;
+    background:var(--ember); box-shadow:0 10px 26px rgba(245,135,31,.4); display:flex; align-items:center; justify-content:center; }
+  /* Meridian origin glyph in the FAB */
+  .fab svg { display:block; }
+  .phone-inner { position:relative; }
+
+  .caption { text-align:center; color:#5a6472; font-size:12px; margin:16px auto 0; max-width:390px; line-height:17px; }
+</style>
+</head>
+<body>
+  <div class="phone">
+    <div class="phone-inner">
+      <div class="statusbar"><span class="metric">9:41</span><span class="dots">● ● ●</span></div>
+      <div class="header">
+        <h1 class="display">Today</h1>
+        <div class="seg"><button class="active">Today</button><button>History</button></div>
+      </div>
+
+      <div class="scroll">
+
+        <!-- ===== MeridianBalance (hero / signature) ===== -->
+        <div class="card">
+          <div class="balance-head">
+            <span class="net-label">Net so far today</span>
+            <span class="net"><span class="val">+1,230</span><span class="unit">kcal</span></span>
+          </div>
+
+          <div class="beam-wrap">
+            <div class="beam-baseline"></div>
+            <!-- intake mass wider than expenditure → origin sits right-of-center → positive net -->
+            <div class="beam-mass beam-intake" style="width:41%;"></div>
+            <div class="beam-mass beam-exp" style="width:14%;"></div>
+            <!-- origin offset toward the cool side by the net proportion; here surplus pushes it right of true-center -->
+            <div class="origin-riser" style="left:64%;"></div>
+            <div class="origin" style="left:64%; transform:translate(-50%,-50%);"></div>
+          </div>
+
+          <div class="beam-ends">
+            <div class="beam-end in"><span class="overline">In · food</span><span class="v">1,850</span></div>
+            <div class="beam-end out"><span class="overline">Out · burned</span><span class="v">620</span></div>
+          </div>
+          <div class="beam-note">Net so far today — MileLift tracks what you took in and burned, not a target.</div>
+        </div>
+
+        <!-- ===== Macro breakdown (monochrome bars, not rings) ===== -->
+        <div class="card macro">
+          <span class="overline">Macros · from what you logged</span>
+          <div class="macro-row" style="margin-top:12px;">
+            <span class="lab overline">Protein</span>
+            <span class="macro-track"><span class="macro-fill" style="width:58%;"></span></span>
+            <span class="macro-val">124<small> g</small></span>
+          </div>
+          <div class="macro-row">
+            <span class="lab overline">Carb</span>
+            <span class="macro-track"><span class="macro-fill" style="width:80%;"></span></span>
+            <span class="macro-val">196<small> g</small></span>
+          </div>
+          <div class="macro-row">
+            <span class="lab overline">Fat</span>
+            <span class="macro-track"><span class="macro-fill" style="width:34%;"></span></span>
+            <span class="macro-val">61<small> g</small></span>
+          </div>
+        </div>
+
+        <!-- ===== Expenditure provenance (CORE-11) ===== -->
+        <div class="card">
+          <div class="exp-head" style="margin-bottom:6px;">
+            <span class="overline">Calories out · where it came from</span>
+            <span class="metric" style="font-weight:700;font-size:14px;">−620</span>
+          </div>
+          <div class="exp-row">
+            <span class="tag run">Tracked · Run</span>
+            <span class="name">Evening Run<span class="sub">27 min · from your Activity log</span></span>
+            <span class="kcal">−450</span><span class="chev">›</span>
+          </div>
+          <div class="exp-row">
+            <span class="tag manual">Manual</span>
+            <span class="name">Yoga class<span class="sub">You logged this by hand</span></span>
+            <span class="kcal">−170</span><span class="chev">›</span>
+          </div>
+        </div>
+
+        <!-- soft, non-blocking overlap advisory (post-save, dismissible) -->
+        <div class="card" style="background:var(--gold-tint); border-color:rgba(245,184,48,.35);">
+          <div style="display:flex; gap:10px;">
+            <div style="color:var(--gold); font-weight:700;">!</div>
+            <div style="flex:1;">
+              <div style="font-size:13px; line-height:19px; color:var(--text-primary);">
+                Logged. Heads up — you already have a tracked workout in this window
+                (<b>Evening Run, −450</b>) that's counted in today's burn. Both are counting now.
+              </div>
+              <div style="display:flex; gap:10px; margin-top:12px;">
+                <span style="font-weight:600; font-size:13px; color:var(--text-primary);">Keep both</span>
+                <span style="font-weight:600; font-size:13px; color:var(--cyan);">Remove this burn</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== Water strip ===== -->
+        <div class="card">
+          <div class="water-top">
+            <span class="overline">Water</span>
+            <span class="water-total">1,250<small> ml today</small></span>
+          </div>
+          <div class="water-accr"><span style="width:50%;"></span></div>
+          <div class="chips">
+            <span class="chip">250 ml</span><span class="chip">500 ml</span>
+            <span class="chip">750 ml</span><span class="chip custom">Custom</span>
+          </div>
+        </div>
+
+        <!-- ===== Meals ===== -->
+        <div class="sect-label overline">Meals</div>
+
+        <div class="card">
+          <div class="meal-head">
+            <span class="mt">Breakfast</span>
+            <span class="mtot">520 kcal</span>
+          </div>
+          <div class="item">
+            <span class="nm">Greek yogurt, plain<span class="src">USDA</span><span class="sv">1 cup · 245 g</span></span>
+            <span class="ik">146</span>
+          </div>
+          <div class="item">
+            <span class="nm">Rolled oats<span class="src">USDA</span><span class="sv">80 g</span></span>
+            <span class="ik">311</span>
+          </div>
+          <div class="item">
+            <span class="nm">Blueberries<span class="src">USDA</span><span class="sv">0.5 cup · 74 g</span></span>
+            <span class="ik">63</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+            <span class="addfood">＋ Add food</span>
+            <span class="pill synced"><span class="dot"></span>Synced</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="meal-head">
+            <span class="mt">Lunch</span>
+            <span class="mtot">1,330 kcal</span>
+          </div>
+          <div class="item">
+            <span class="nm">Chicken breast, grilled<span class="src">USDA</span><span class="sv">180 g</span></span>
+            <span class="ik">297</span>
+          </div>
+          <div class="item">
+            <span class="nm">Protein bar, cookie dough<span class="src" style="color:var(--gold);">Open Food Facts</span><span class="sv">1 bar · 60 g</span></span>
+            <span class="ik">240</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+            <span class="addfood">＋ Add food</span>
+            <span class="pill"><span class="dot"></span>Saved · will sync</span>
+          </div>
+        </div>
+
+      </div><!-- /scroll -->
+
+      <!-- Log FAB with Meridian origin glyph -->
+      <div class="fab" aria-label="Log food">
+        <svg width="26" height="26" viewBox="0 0 26 26">
+          <line x1="4" y1="18" x2="22" y2="18" stroke="#0B0F16" stroke-width="2.4" stroke-linecap="round"/>
+          <line x1="8" y1="4" x2="8" y2="22" stroke="#0B0F16" stroke-width="2.4" stroke-linecap="round"/>
+          <circle cx="8" cy="18" r="3.2" fill="#0B0F16"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <p class="caption">
+    MileLift · Food › Today — the <b>MeridianBalance</b> signature. Food pushes the origin warm (ember),
+    burn pulls it cool (cyan); where the origin rests is the net. No goal ring, no macro donuts.
+    Real theme.ts token values. Static design proof — not the RN implementation.
+  </p>
+</body>
+</html>
