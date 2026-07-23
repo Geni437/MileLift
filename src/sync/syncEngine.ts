@@ -33,6 +33,18 @@ import {
   pushWorkoutTemplates,
   refreshExerciseLibraryIfStale,
 } from './workoutSync';
+import {
+  pullCustomFoods,
+  pullFoodLogEntries,
+  pullManualBurnLogs,
+  pullSavedMeals,
+  pullWaterIntakeLogs,
+  pushCustomFoods,
+  pushFoodLogEntries,
+  pushManualBurnLogs,
+  pushSavedMeals,
+  pushWaterIntakeLogs,
+} from './nutritionSync';
 import type { ProfileRow } from '../db/repositories/profileRepository';
 import type { ProfileHealthRow } from '../db/repositories/profileHealthRepository';
 import type { ConsentRow } from '../db/repositories/consentRepository';
@@ -145,6 +157,23 @@ export async function runSync(_reason: 'startup' | 'foreground' | 'reconnect' | 
     await pullBodyweightLogs(currentUserId);
     await pullBodyMeasurements(currentUserId);
     await pullProgressPhotos(currentUserId);
+
+    // Phase 3 — Module B. Custom foods / saved meals push before meals so a
+    // freshly-created custom food or saved meal a log references has
+    // already landed server-side by the time it's read back. Meals push is
+    // the gate-critical, strictly-sequential piece (RPC §2.6 discipline) —
+    // pushFoodLogEntries itself loops sequentially, never Promise.all.
+    await pushCustomFoods(currentUserId);
+    await pushSavedMeals(currentUserId);
+    await pushFoodLogEntries(currentUserId);
+    await pushWaterIntakeLogs(currentUserId);
+    await pushManualBurnLogs(currentUserId);
+
+    await pullCustomFoods(currentUserId);
+    await pullSavedMeals(currentUserId);
+    await pullFoodLogEntries(currentUserId);
+    await pullWaterIntakeLogs(currentUserId);
+    await pullManualBurnLogs(currentUserId);
   } finally {
     syncing = false;
   }

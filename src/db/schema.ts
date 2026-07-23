@@ -681,4 +681,238 @@ export const SCHEMA_STATEMENTS: string[] = [
   );`,
 
   `CREATE INDEX IF NOT EXISTS idx_progress_photo_images_event ON progress_photo_images (timeline_event_id);`,
+
+  // ---------------------------------------------------------------------
+  // Phase 3 — Module B (nutrition & food logging). Design ref:
+  // docs/architecture/phase-3-module-b.md §9 ("Local store extension"):
+  // "food_log_entries, food_log_items, water_intake_logs,
+  // manual_calorie_burn_logs, custom_foods, saved_meals(+items), and the
+  // bounded read-only cached food subset + servings." Table names mirror the
+  // server 1:1 for the child/definition tables (Phase 2's convention);
+  // food_log_entries merges spine + meal fields per the `activities`/
+  // `workout_sessions` simplification (no generic local timeline_events
+  // table exists, schema.ts header).
+  // ---------------------------------------------------------------------
+
+  // Bounded local cache of resolved catalog foods (§2.2/§2.4/§9) — populated
+  // from search_foods_v1/resolve_barcode_v1 responses as the user
+  // searches/scans/logs. NEVER a full-catalog mirror: rows are inserted only
+  // on an actual search/barcode-resolve hit and capped (foodCacheRepository)
+  // by evicting the least-recently-used row beyond a small bound, so this
+  // stays orders of magnitude under any storage/`max_rows` concern by
+  // construction (the client never bulk-selects `foods` at all). Read-only
+  // from the server's point of view — never pushed.
+  `CREATE TABLE IF NOT EXISTS food_cache (
+    food_id TEXT PRIMARY KEY NOT NULL,
+    source TEXT NOT NULL,
+    name TEXT NOT NULL,
+    brand TEXT,
+    barcode TEXT,
+    basis TEXT NOT NULL,
+    energy_kcal REAL NOT NULL,
+    protein_g REAL,
+    carb_g REAL,
+    fat_g REAL,
+    data_quality TEXT NOT NULL,
+    attribution TEXT,
+    servings_json TEXT NOT NULL DEFAULT '[]',
+    cached_at TEXT NOT NULL,
+    last_used_at TEXT NOT NULL
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_food_cache_barcode ON food_cache (barcode) WHERE barcode IS NOT NULL;`,
+  `CREATE INDEX IF NOT EXISTS idx_food_cache_name ON food_cache (name);`,
+  `CREATE INDEX IF NOT EXISTS idx_food_cache_last_used ON food_cache (last_used_at);`,
+
+  `CREATE TABLE IF NOT EXISTS custom_foods (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    barcode TEXT,
+    name TEXT NOT NULL,
+    brand TEXT,
+    basis TEXT NOT NULL,
+    energy_kcal REAL NOT NULL,
+    protein_g REAL,
+    carb_g REAL,
+    fat_g REAL,
+    default_serving_g_or_ml REAL,
+    notes TEXT,
+    deleted_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    -- See custom_exercises.server_confirmed doc comment (Phase 2 section
+    -- above) — same first-create-vs-edit push discipline.
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_custom_foods_user ON custom_foods (user_id) WHERE deleted_at IS NULL;`,
+  `CREATE INDEX IF NOT EXISTS idx_custom_foods_user_barcode ON custom_foods (user_id, barcode) WHERE deleted_at IS NULL AND barcode IS NOT NULL;`,
+
+  // Merged spine (timeline_events) + food_log_entries fields, mirroring the
+  // `workout_sessions` precedent. `committed_at IS NULL` is the CORE-06
+  // "draft meal tray" domain-state case (types.ts LocalFoodLogEntry doc
+  // comment) — never included in getUnsynced() until Save/Log flips it,
+  // exactly like workout_sessions.is_finished.
+  `CREATE TABLE IF NOT EXISTS food_log_entries (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    meal_type TEXT NOT NULL,
+    title TEXT,
+    notes TEXT,
+    occurred_at TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    event_timezone TEXT NOT NULL,
+    total_energy_kcal REAL NOT NULL DEFAULT 0,
+    total_protein_g REAL,
+    total_carb_g REAL,
+    total_fat_g REAL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    visibility TEXT NOT NULL DEFAULT 'private',
+    client_created_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    committed_at TEXT,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'local',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_food_log_entries_user_occurred
+    ON food_log_entries (user_id, occurred_at DESC, id DESC)
+    WHERE deleted_at IS NULL AND committed_at IS NOT NULL;`,
+
+  `CREATE INDEX IF NOT EXISTS idx_food_log_entries_user_local_date
+    ON food_log_entries (user_id, local_date)
+    WHERE deleted_at IS NULL AND committed_at IS NOT NULL;`,
+
+  `CREATE INDEX IF NOT EXISTS idx_food_log_entries_sync_status ON food_log_entries (sync_status);`,
+
+  // The CORE-06 per-food firehose, mirroring workout_set_logs' `dirty`/
+  // `server_confirmed` per-item idempotency bookkeeping (§9).
+  `CREATE TABLE IF NOT EXISTS food_log_items (
+    id TEXT PRIMARY KEY NOT NULL,
+    timeline_event_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    food_id TEXT,
+    custom_food_id TEXT,
+    food_name_snapshot TEXT NOT NULL,
+    brand_snapshot TEXT,
+    serving_label_snapshot TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    serving_g_or_ml_snapshot REAL NOT NULL,
+    energy_kcal REAL NOT NULL,
+    protein_g REAL,
+    carb_g REAL,
+    fat_g REAL,
+    data_quality_snapshot TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    deleted_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    dirty INTEGER NOT NULL DEFAULT 1,
+    server_confirmed INTEGER NOT NULL DEFAULT 0
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_food_log_items_event_order
+    ON food_log_items (timeline_event_id, sort_order);`,
+
+  `CREATE INDEX IF NOT EXISTS idx_food_log_items_user_food
+    ON food_log_items (user_id, food_id) WHERE deleted_at IS NULL AND food_id IS NOT NULL;`,
+
+  `CREATE INDEX IF NOT EXISTS idx_food_log_items_dirty
+    ON food_log_items (timeline_event_id) WHERE dirty = 1;`,
+
+  // 1:1 with a `water_intake` event (CORE-09, §1.7). Not consent-gated.
+  `CREATE TABLE IF NOT EXISTS water_intake_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    event_timezone TEXT NOT NULL,
+    volume_ml REAL NOT NULL,
+    unit_volume_snapshot TEXT NOT NULL DEFAULT 'ml',
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_water_intake_logs_user_local_date
+    ON water_intake_logs (user_id, local_date) WHERE deleted_at IS NULL;`,
+
+  // 1:1 with a `manual_calorie_burn` event (CORE-11, §1.8/§4.3). Stores the
+  // POSITIVE magnitude the user entered — sync negates it onto the spine per
+  // `save_manual_burn_v1`'s contract (types.ts doc comment). The
+  // `overlap_advisory_json` columns cache the CORE-11 soft advisory
+  // (optimistically computed client-side pre-sync, reconciled from the RPC
+  // response on sync, §CORE-Sync coordination note) so the post-save banner
+  // survives an app restart before it's dismissed.
+  `CREATE TABLE IF NOT EXISTS manual_calorie_burn_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    event_timezone TEXT NOT NULL,
+    energy_kcal_magnitude REAL NOT NULL,
+    label TEXT NOT NULL,
+    activity_type_code TEXT,
+    duration_minutes INTEGER,
+    energy_source TEXT NOT NULL DEFAULT 'user_entered',
+    notes TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    overlap_advisory_json TEXT,
+    overlap_advisory_dismissed INTEGER NOT NULL DEFAULT 0,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_manual_calorie_burn_logs_user_local_date
+    ON manual_calorie_burn_logs (user_id, local_date) WHERE deleted_at IS NULL;`,
+
+  `CREATE TABLE IF NOT EXISTS saved_meals (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    meal_type TEXT,
+    deleted_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_saved_meals_user ON saved_meals (user_id) WHERE deleted_at IS NULL;`,
+
+  `CREATE TABLE IF NOT EXISTS saved_meal_items (
+    id TEXT PRIMARY KEY NOT NULL,
+    saved_meal_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    food_id TEXT,
+    custom_food_id TEXT,
+    food_name_snapshot_local TEXT NOT NULL,
+    serving_label TEXT NOT NULL,
+    serving_g_or_ml REAL NOT NULL,
+    quantity REAL NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    -- Real server-side DELETE is supported for this table (unlike most of
+    -- this app's tables) — see the 20260722101000 migration header. Mirrors
+    -- workout_template_exercises' deleted_locally "pending delete" marker.
+    deleted_locally INTEGER NOT NULL DEFAULT 0,
+    server_confirmed INTEGER NOT NULL DEFAULT 0,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    last_sync_error TEXT
+  );`,
+
+  `CREATE INDEX IF NOT EXISTS idx_saved_meal_items_meal ON saved_meal_items (saved_meal_id, sort_order);`,
 ];

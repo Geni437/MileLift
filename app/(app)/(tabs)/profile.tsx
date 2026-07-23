@@ -1,11 +1,13 @@
 import React from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
 
 import { theme } from '../../../src/theme';
 import { Screen } from '../../../src/components/Screen';
 import { SkeletonBlock } from '../../../src/components/SkeletonBlock';
 import { InlineBanner } from '../../../src/components/InlineBanner';
 import { EmptyState } from '../../../src/components/EmptyState';
+import { TextButton } from '../../../src/components/TextButton';
 import { IdentitySection } from '../../../src/components/profile/IdentitySection';
 import { TrainingBalanceSection } from '../../../src/components/profile/TrainingBalanceSection';
 import { UnitsSection } from '../../../src/components/profile/UnitsSection';
@@ -93,6 +95,14 @@ export default function ProfileScreen() {
         }}
       />
 
+      <View style={styles.creditsSection}>
+        <Text style={[theme.type.label, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
+          Data & credits
+        </Text>
+        <TextButton label="Exercise data credits" onPress={() => router.push('/exercise-credits')} />
+        <TextButton label="Nutrition sources & credits" onPress={() => router.push('/nutrition-credits')} />
+      </View>
+
       <AccountSection
         email={email}
         signInMethods={signInMethods}
@@ -109,5 +119,8 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   content: {
     gap: theme.space.lg,
+  },
+  creditsSection: {
+    gap: theme.space.xxs,
   },
 });

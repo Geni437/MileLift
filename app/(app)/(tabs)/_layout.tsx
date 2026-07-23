@@ -4,11 +4,12 @@ import { Text } from 'react-native';
 import { theme } from '../../../src/theme';
 
 /**
- * Tab bar. Phase 1 added Activity; Phase 2 adds Lift (screens-phase-2.md §B:
- * "Tabs become: Home · Activity · Lift · Profile — four text labels, no new
- * icon set" — the discipline carries forward again. "Lift" is kept as the
- * brand's own word rather than renaming "Activity" for symmetry, per that
- * doc's §Decisions item 2.
+ * Tab bar. Phase 1 added Activity; Phase 2 adds Lift; Phase 3 adds Food
+ * (screens-phase-3.md §B: "Tabs become: Home · Activity · Lift · Food ·
+ * Profile — five text labels, no new icon set" — the discipline carries
+ * forward again, chosen over a branded coinage like "Fuel" per that doc's
+ * §Decisions D1). "Lift" is kept as the brand's own word rather than
+ * renaming "Activity" for symmetry, per screens-phase-2.md §Decisions item 2.
  */
 export default function TabsLayout() {
   return (
@@ -43,6 +44,13 @@ export default function TabsLayout() {
         options={{
           title: 'Lift',
           tabBarLabel: ({ color }) => <Text style={{ color, ...theme.type.label }}>Lift</Text>,
+        }}
+      />
+      <Tabs.Screen
+        name="food"
+        options={{
+          title: 'Food',
+          tabBarLabel: ({ color }) => <Text style={{ color, ...theme.type.label }}>Food</Text>,
         }}
       />
       <Tabs.Screen

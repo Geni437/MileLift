@@ -141,6 +141,23 @@ jest.mock('../sync/workoutSync', () => ({
   refreshExerciseLibraryIfStale: jest.fn(() => mockResolveSoon(undefined)),
 }));
 
+// Phase 3 — Module B. Mocked for the same reason as '../sync/workoutSync'
+// above: its real implementation transitively imports `../db/client`
+// (expo-sqlite), which this pure-logic concurrency test never needs to
+// touch.
+jest.mock('../sync/nutritionSync', () => ({
+  pullCustomFoods: jest.fn(() => mockResolveSoon(undefined)),
+  pullFoodLogEntries: jest.fn(() => mockResolveSoon(undefined)),
+  pullManualBurnLogs: jest.fn(() => mockResolveSoon(undefined)),
+  pullSavedMeals: jest.fn(() => mockResolveSoon(undefined)),
+  pullWaterIntakeLogs: jest.fn(() => mockResolveSoon(undefined)),
+  pushCustomFoods: jest.fn(() => mockResolveSoon(undefined)),
+  pushFoodLogEntries: jest.fn(() => mockResolveSoon(undefined)),
+  pushManualBurnLogs: jest.fn(() => mockResolveSoon(undefined)),
+  pushSavedMeals: jest.fn(() => mockResolveSoon(undefined)),
+  pushWaterIntakeLogs: jest.fn(() => mockResolveSoon(undefined)),
+}));
+
 describe('runSync single-in-flight guard (RPC §2.6 sequencing requirement)', () => {
   beforeEach(() => {
     mockConcurrentInFlight = 0;

@@ -562,3 +562,228 @@ export type LocalProgressPhoto = {
   syncStatus: SyncStatus;
   lastSyncError: string | null;
 };
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Module B (nutrition & food logging). Design ref:
+// docs/architecture/phase-3-module-b.md, docs/api/save-food-log-entry-v1.md,
+// docs/api/save-water-and-manual-burn-v1.md,
+// docs/api/daily-energy-balance-and-macros-v1.md,
+// docs/api/search-foods-and-resolve-barcode-v1.md, docs/design/screens-phase-3.md.
+// ---------------------------------------------------------------------------
+
+export type FoodSource = 'usda_fdc' | 'open_food_facts' | 'milelift_authored';
+export type FoodMeasureBasis = 'per_100g' | 'per_100ml';
+export type FoodDataQuality = 'high' | 'medium' | 'low';
+
+export type FoodServing = {
+  id: string;
+  label: string;
+  gramOrMlWeight: number;
+  isDefault: boolean;
+};
+
+/**
+ * Bounded local CACHE of a resolved catalog food (§2.4/§9 — "cache what the
+ * user has searched/logged/scanned," never a full-catalog mirror). Populated
+ * from `search_foods_v1`/`resolve_barcode_v1` responses and read back for
+ * offline search-of-recents, offline barcode resolution, and the CORE-10
+ * offline saved-meal cached-macro fallback. Read-only from the server's point
+ * of view — never pushed.
+ */
+export type LocalFoodCacheEntry = {
+  foodId: string;
+  source: FoodSource;
+  name: string;
+  brand: string | null;
+  barcode: string | null;
+  basis: FoodMeasureBasis;
+  energyKcal: number;
+  proteinG: number | null;
+  carbG: number | null;
+  fatG: number | null;
+  dataQuality: FoodDataQuality;
+  attribution: string | null;
+  servings: FoodServing[];
+  cachedAt: string;
+  lastUsedAt: string;
+};
+
+/** Owner-owned, offline-first (CORE-06/07 barcode-miss landing spot, §1.4). */
+export type LocalCustomFood = {
+  id: string;
+  userId: string;
+  barcode: string | null;
+  name: string;
+  brand: string | null;
+  basis: FoodMeasureBasis;
+  energyKcal: number;
+  proteinG: number | null;
+  carbG: number | null;
+  fatG: number | null;
+  defaultServingGOrMl: number | null;
+  notes: string | null;
+  deletedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other';
+export type NutritionSource = 'manual' | 'import';
+export type NutritionVisibility = 'private' | 'followers' | 'public';
+
+/**
+ * One row of the local `food_log_entries` mirror — spine (timeline_events)
+ * fields + meal fields merged, the `activities`/`workout_sessions`
+ * simplification (schema.ts header). `committedAt = null` is the CORE-06
+ * "draft meal tray" domain-state case (architecture §9: "a meal being
+ * assembled is layer-2 local domain state, durable in SQLite") — the row and
+ * its items exist locally (crash-durable) as items are added, but are never
+ * included in `getUnsynced()` until "Save meal"/"Log food" sets
+ * `committedAt`, mirroring `workout_sessions.isFinished`.
+ */
+export type LocalFoodLogEntry = {
+  id: string; // = timeline_event_id
+  userId: string;
+  mealType: MealType;
+  title: string | null;
+  notes: string | null;
+  occurredAt: string;
+  localDate: string;
+  eventTimezone: string;
+  totalEnergyKcal: number;
+  totalProteinG: number | null;
+  totalCarbG: number | null;
+  totalFatG: number | null;
+  source: NutritionSource;
+  visibility: NutritionVisibility;
+  clientCreatedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  deletedAt: string | null;
+  committedAt: string | null;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+/** One row of the local `food_log_items` mirror — the CORE-06 firehose (architecture §1.6, §9). */
+export type LocalFoodLogItem = {
+  id: string;
+  timelineEventId: string;
+  userId: string;
+  foodId: string | null;
+  customFoodId: string | null;
+  foodNameSnapshot: string;
+  brandSnapshot: string | null;
+  servingLabelSnapshot: string;
+  quantity: number;
+  servingGOrMlSnapshot: number;
+  energyKcal: number;
+  proteinG: number | null;
+  carbG: number | null;
+  fatG: number | null;
+  dataQualitySnapshot: FoodDataQuality | null;
+  sortOrder: number;
+  deletedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  /** Has this row changed locally since it was last confirmed synced (mirrors `LocalWorkoutSet.dirty`). */
+  dirty: boolean;
+  serverConfirmed: boolean;
+};
+
+export type UnitVolumeSnapshot = 'ml' | 'fl_oz';
+export type WaterSource = 'manual' | 'wearable' | 'import';
+
+/** 1:1 with a `water_intake` timeline event (CORE-09, §1.7). Not consent-gated. */
+export type LocalWaterIntakeLog = {
+  id: string; // = timeline_event_id
+  userId: string;
+  occurredAt: string;
+  localDate: string;
+  eventTimezone: string;
+  volumeMl: number;
+  unitVolumeSnapshot: UnitVolumeSnapshot;
+  source: WaterSource;
+  createdAt: string | null;
+  updatedAt: string | null;
+  deletedAt: string | null;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+export type ManualBurnEnergySource = 'user_entered' | 'estimated';
+
+export type OverlapAdvisoryEvent = {
+  timelineEventId: string;
+  eventType: string;
+  occurredAt: string;
+  durationSeconds: number | null;
+  energyKcal: number | null;
+};
+
+export type OverlapAdvisory = {
+  hasOverlap: boolean;
+  overlappingEvents: OverlapAdvisoryEvent[];
+};
+
+/** 1:1 with a `manual_calorie_burn` timeline event (CORE-11, §1.8). `energyKcal` is stored as the POSITIVE magnitude the user entered locally; sync writes it negative onto the spine per `save_manual_burn_v1`'s contract. */
+export type LocalManualBurnLog = {
+  id: string; // = timeline_event_id
+  userId: string;
+  occurredAt: string;
+  localDate: string;
+  eventTimezone: string;
+  energyKcalMagnitude: number;
+  label: string;
+  activityTypeCode: string | null;
+  durationMinutes: number | null;
+  energySource: ManualBurnEnergySource;
+  notes: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  deletedAt: string | null;
+  /** The CORE-11 soft, non-blocking overlap advisory (§4.3) — optimistically computed on-device pre-sync, reconciled with the RPC's response on sync. Never blocks save. */
+  overlapAdvisory: OverlapAdvisory | null;
+  overlapAdvisoryDismissed: boolean;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+/** Owner-owned *definition*, not an event (CORE-10, §1.10) — the `workout_templates` precedent. */
+export type LocalSavedMeal = {
+  id: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  mealType: MealType | null;
+  deletedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
+
+/** Child of `saved_meals` (§1.10) — NO macro snapshot (a saved meal is a live plan; macros resolve at log time). `foodNameSnapshotLocal` is a local-only display convenience, never sent to the server (mirrors `LocalWorkoutTemplateExercise.exerciseNameSnapshot`). */
+export type LocalSavedMealItem = {
+  id: string;
+  savedMealId: string;
+  userId: string;
+  foodId: string | null;
+  customFoodId: string | null;
+  foodNameSnapshotLocal: string;
+  servingLabel: string;
+  servingGOrMl: number;
+  quantity: number;
+  sortOrder: number;
+  deletedLocally: boolean;
+  serverConfirmed: boolean;
+  syncStatus: SyncStatus;
+  lastSyncError: string | null;
+};
