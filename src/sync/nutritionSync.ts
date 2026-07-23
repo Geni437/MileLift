@@ -238,7 +238,7 @@ async function pushMealSave(entry: LocalFoodLogEntry): Promise<void> {
       totalCarbG: result.total_carb_g,
       totalFatG: result.total_fat_g,
     },
-    dirtyItems.map((i) => i.id)
+    dirtyItems.map((i) => ({ id: i.id, updatedAt: i.updatedAt }))
   );
 }
 

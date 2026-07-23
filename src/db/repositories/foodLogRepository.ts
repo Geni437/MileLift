@@ -181,6 +181,27 @@ async function runUpsertItem(db: SQLite.SQLiteDatabase, id: string, timelineEven
   );
 }
 
+/**
+ * Re-enqueues an already-committed entry for sync after a post-commit item
+ * edit/add/remove. Without this, editing a meal that already reached
+ * `sync_status = 'synced'` left it there — `getUnsynced()` (what
+ * `pushFoodLogEntries` queries) would never pick the edit up again, AND
+ * the entry would keep passing `reconcileEntryFromServer`'s "don't clobber
+ * an unsynced edit" guard (which only checks `sync_status !== 'synced'`),
+ * so the next pull would silently overwrite the corrected local total back
+ * to the server's stale pre-edit value. A draft never yet committed
+ * (`committed_at IS NULL`) is left untouched — `commit()` is the only
+ * thing that should ever move it out of `'local'`.
+ */
+async function markEntryDirtyIfCommitted(db: SQLite.SQLiteDatabase, timelineEventId: string): Promise<void> {
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `UPDATE food_log_entries SET sync_status = 'pending', updated_at = ?, last_sync_error = NULL
+     WHERE id = ? AND committed_at IS NOT NULL AND sync_status != 'pending'`,
+    [now, timelineEventId]
+  );
+}
+
 const PAGE_SIZE = 20;
 
 /**
@@ -315,7 +336,22 @@ export const foodLogRepository = {
     return { items, nextCursor: hasMore && last ? { occurredAt: last.occurredAt, id: last.id } : null };
   },
 
-  async markSyncedWithServerTotals(id: string, totals: { totalEnergyKcal: number; totalProteinG: number | null; totalCarbG: number | null; totalFatG: number | null }, syncedItemIds: string[]): Promise<void> {
+  /**
+   * `syncedItems` carries each pushed item's `updatedAt` AS OF THE SNAPSHOT
+   * `pushMealSave` sent to the RPC, not just its id. The clear-dirty write
+   * is conditioned on `updated_at` still matching that snapshot — if a
+   * concurrent local edit changed the item again while the RPC call was
+   * in flight (the app stays fully interactive during that await), its
+   * `updated_at` (and `dirty = 1`, via `runUpsertItem`) will have moved on,
+   * the conditional update becomes a no-op, and the item correctly stays
+   * dirty for the next push instead of being silently marked synced with
+   * content that was never actually transmitted.
+   */
+  async markSyncedWithServerTotals(
+    id: string,
+    totals: { totalEnergyKcal: number; totalProteinG: number | null; totalCarbG: number | null; totalFatG: number | null },
+    syncedItems: { id: string; updatedAt: string | null }[]
+  ): Promise<void> {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.withTransactionAsync(async () => {
@@ -325,8 +361,11 @@ export const foodLogRepository = {
          WHERE id = ?`,
         [totals.totalEnergyKcal, totals.totalProteinG, totals.totalCarbG, totals.totalFatG, now, now, id]
       );
-      for (const itemId of syncedItemIds) {
-        await db.runAsync(`UPDATE food_log_items SET dirty = 0, server_confirmed = 1 WHERE id = ?`, [itemId]);
+      for (const item of syncedItems) {
+        await db.runAsync(`UPDATE food_log_items SET dirty = 0, server_confirmed = 1 WHERE id = ? AND updated_at IS ?`, [
+          item.id,
+          item.updatedAt,
+        ]);
       }
     });
   },
@@ -390,6 +429,7 @@ export const foodLogRepository = {
     const db = await getDb();
     await runUpsertItem(db, id, timelineEventId, userId, fields);
     await this.recomputeTotals(timelineEventId);
+    await markEntryDirtyIfCommitted(db, timelineEventId);
     const row = await db.getFirstAsync<ItemRow>('SELECT * FROM food_log_items WHERE id = ?', [id]);
     return toLocalItem(row!);
   },
@@ -406,6 +446,7 @@ export const foodLogRepository = {
       await db.runAsync(`UPDATE food_log_items SET deleted_at = ?, updated_at = ?, dirty = 1 WHERE id = ?`, [now, now, id]);
     }
     await this.recomputeTotals(row.timeline_event_id);
+    await markEntryDirtyIfCommitted(db, row.timeline_event_id);
   },
 
   async getDirtyItems(timelineEventId: string): Promise<LocalFoodLogItem[]> {

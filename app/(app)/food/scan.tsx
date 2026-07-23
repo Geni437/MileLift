@@ -53,16 +53,21 @@ export default function ScanBarcodeScreen() {
 
   const handleScanned = async (barcode: string) => {
     setResolving(true);
-    const result = await resolveBarcode(barcode);
-    setResolving(false);
-    if (result.status === 'hit') {
-      setResolvedFood({ item: result.item, servings: result.servings });
-      setSelectedServingId(result.servings.find((s) => s.isDefault)?.id ?? result.servings[0]?.id ?? null);
-      setQuantity(1);
-    } else {
-      // Miss (server-confirmed or offline) — the explicit non-dead-end path
-      // (§2.4 step 3): route to custom-food creation, prefilling the barcode.
-      router.replace({ pathname: '/custom-food', params: { prefillBarcode: barcode } });
+    try {
+      const result = await resolveBarcode(barcode);
+      if (result.status === 'hit') {
+        setResolvedFood({ item: result.item, servings: result.servings });
+        setSelectedServingId(result.servings.find((s) => s.isDefault)?.id ?? result.servings[0]?.id ?? null);
+        setQuantity(1);
+      } else {
+        // Miss (server-confirmed or offline) — the explicit non-dead-end path
+        // (§2.4 step 3): route to custom-food creation, prefilling the barcode.
+        router.replace({ pathname: '/custom-food', params: { prefillBarcode: barcode } });
+      }
+    } finally {
+      // An unexpected throw (e.g. getDb() itself failing) must never leave
+      // the scan UI stuck showing a resolving spinner forever.
+      setResolving(false);
     }
   };
 
