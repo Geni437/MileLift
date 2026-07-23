@@ -36,7 +36,24 @@ export default function CustomFoodScreen() {
   const [saving, setSaving] = useState(false);
 
   const parsedEnergy = Number(energyKcal);
-  const canSave = name.trim().length > 0 && Number.isFinite(parsedEnergy) && parsedEnergy >= 0;
+  // Empty is valid (macro fields are optional), but a non-empty value must be
+  // a non-negative number — mirrors the DB's own
+  // custom_foods_{protein,carb,fat}_g_non_negative_chk constraints, so a bad
+  // value is rejected here instead of failing later as an opaque, permanently
+  // `failed` sync with a raw Postgres constraint-violation message (there is
+  // no edit-custom-food screen to correct it from).
+  const isValidOptionalNonNegative = (raw: string) => {
+    if (!raw.trim()) return true;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0;
+  };
+  const canSave =
+    name.trim().length > 0 &&
+    Number.isFinite(parsedEnergy) &&
+    parsedEnergy >= 0 &&
+    isValidOptionalNonNegative(proteinG) &&
+    isValidOptionalNonNegative(carbG) &&
+    isValidOptionalNonNegative(fatG);
 
   const handleSave = async () => {
     if (!userId || !canSave) return;

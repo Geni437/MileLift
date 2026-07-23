@@ -32,6 +32,8 @@ function displayToMl(value: number, unit: UnitVolumeSnapshot): number {
  * as a slim cyan accretion, deliberately off the energy beam (water is not
  * `energy_kcal`) and with no goal target (§12 decision 5).
  */
+
+
 export function WaterQuickAdd({ totalMl, unit, onLogMl, canUndo, onUndo }: Props) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState('');

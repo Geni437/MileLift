@@ -77,6 +77,21 @@ export type SavedMealItemFields = {
   sortOrder: number;
 };
 
+/**
+ * Re-enqueues an already-synced meal for push after a post-sync item
+ * add/edit/remove. Without this, `pushSavedMeals` only ever revisits a
+ * meal via `getUnsynced` (`sync_status IN ('pending','failed')`) — an
+ * item edit alone (which only ever set the ITEM's own `sync_status`) would
+ * leave the parent meal at `'synced'` forever, so `pushSavedMeals`'s outer
+ * loop would never call `getPendingItemDeletes`/`getUnsyncedItems` for it
+ * again and the item change would never reach the server. The exact same
+ * bug class as `foodLogRepository.markEntryDirtyIfCommitted`, applied to
+ * the sibling `saved_meals`/`saved_meal_items` pair.
+ */
+async function markMealDirtyIfSynced(db: Awaited<ReturnType<typeof getDb>>, savedMealId: string): Promise<void> {
+  await db.runAsync(`UPDATE saved_meals SET sync_status = 'pending', last_sync_error = NULL WHERE id = ? AND sync_status = 'synced'`, [savedMealId]);
+}
+
 /** CORE-10 builder: `saved_meals` + `saved_meal_items`, owner-owned live plan (§1.10), offline-first — mirrors `workoutTemplatesRepository`. */
 export const savedMealsRepository = {
   async listForUser(userId: string): Promise<LocalSavedMeal[]> {
@@ -181,8 +196,8 @@ export const savedMealsRepository = {
        ON CONFLICT(id) DO UPDATE SET serving_label = excluded.serving_label, serving_g_or_ml = excluded.serving_g_or_ml, quantity = excluded.quantity, sort_order = excluded.sort_order, food_name_snapshot_local = excluded.food_name_snapshot_local, sync_status = 'pending'`,
       [id, savedMealId, userId, fields.foodId, fields.customFoodId, fields.foodNameSnapshotLocal, fields.servingLabel, fields.servingGOrMl, fields.quantity, fields.sortOrder]
     );
-    const db2 = await getDb();
-    const row = await db2.getFirstAsync<ItemRow>('SELECT * FROM saved_meal_items WHERE id = ?', [id]);
+    await markMealDirtyIfSynced(db, savedMealId);
+    const row = await db.getFirstAsync<ItemRow>('SELECT * FROM saved_meal_items WHERE id = ?', [id]);
     return toLocalItem(row!);
   },
 
@@ -196,6 +211,7 @@ export const savedMealsRepository = {
       return;
     }
     await db.runAsync(`UPDATE saved_meal_items SET deleted_locally = 1, sync_status = 'pending' WHERE id = ?`, [id]);
+    await markMealDirtyIfSynced(db, row.saved_meal_id);
   },
 
   async getPendingItemDeletes(savedMealId: string): Promise<LocalSavedMealItem[]> {
