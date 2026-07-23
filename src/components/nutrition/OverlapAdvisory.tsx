@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { theme } from '../../theme';
 import { TextButton } from '../TextButton';
@@ -24,6 +24,12 @@ function eventLabel(e: OverlapAdvisoryEvent): string {
  * equal, non-coercive choices: "Keep both" (the honest default — dismiss)
  * and "Remove this burn" (soft-delete the just-saved burn, an undo, not a
  * block). Both entries keep counting until the user acts.
+ *
+ * Both actions render as EQUAL-weight `TextButton`s — no `danger` styling on
+ * "Remove this burn" — a deliberate exception to this app's usual
+ * red-for-destructive convention, because the design doc calls for
+ * neutrality here specifically (coloring one option red would subtly weight
+ * the choice, the opposite of what this banner exists to avoid).
  */
 export function OverlapAdvisory({ events, onKeepBoth, onRemoveBurn }: Props) {
   const summary = events.map(eventLabel).join('; ');
@@ -38,19 +44,9 @@ export function OverlapAdvisory({ events, onKeepBoth, onRemoveBurn }: Props) {
       </Text>
       <View style={styles.actions}>
         <TextButton label="Keep both" onPress={onKeepBoth} />
-        <RemoveButton onPress={onRemoveBurn} />
+        <TextButton label="Remove this burn" onPress={onRemoveBurn} />
       </View>
     </View>
-  );
-}
-
-function RemoveButton({ onPress }: { onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Remove this burn" style={styles.removeButton}>
-      <Text style={[theme.type.bodyStrong, { color: theme.color.feedback.danger }]} maxFontSizeMultiplier={1.8}>
-        Remove this burn
-      </Text>
-    </Pressable>
   );
 }
 
@@ -64,10 +60,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: theme.space.md,
-  },
-  removeButton: {
-    minHeight: theme.touchTarget.min,
-    justifyContent: 'center',
-    paddingHorizontal: theme.space.sm,
   },
 });

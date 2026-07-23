@@ -10,7 +10,6 @@ import { SecondaryButton } from '../../../src/components/SecondaryButton';
 import { TextButton } from '../../../src/components/TextButton';
 import { SegmentedControl } from '../../../src/components/SegmentedControl';
 import { SkeletonBlock } from '../../../src/components/SkeletonBlock';
-import { EmptyState } from '../../../src/components/EmptyState';
 import { InlineBanner } from '../../../src/components/InlineBanner';
 import { ConsentSheet } from '../../../src/components/consent/ConsentSheet';
 import { MeridianMark } from '../../../src/components/MeridianMark';
@@ -20,6 +19,7 @@ import { WaterQuickAdd } from '../../../src/components/nutrition/WaterQuickAdd';
 import { ExpenditureRow } from '../../../src/components/nutrition/ExpenditureRow';
 import { OverlapAdvisory } from '../../../src/components/nutrition/OverlapAdvisory';
 import { MealCard } from '../../../src/components/nutrition/MealCard';
+import { SyncStatusPill } from '../../../src/components/SyncStatusPill';
 import { useAuth } from '../../../src/state/AuthContext';
 import { useProfile } from '../../../src/state/ProfileContext';
 import { useConsent } from '../../../src/state/ConsentContext';
@@ -28,8 +28,17 @@ import { foodLogRepository } from '../../../src/db/repositories/foodLogRepositor
 import { waterIntakeRepository } from '../../../src/db/repositories/waterIntakeRepository';
 import { manualBurnRepository } from '../../../src/db/repositories/manualBurnRepository';
 import { generateUuidV4 } from '../../../src/lib/uuid';
+import { aggregateSyncStatus } from '../../../src/lib/syncStatus';
 import { runSync } from '../../../src/sync/syncEngine';
-import type { LocalFoodLogEntry, LocalFoodLogItem, LocalManualBurnLog, ManualBurnEnergySource, UnitVolumeSnapshot } from '../../../src/db/types';
+import type {
+  LocalFoodLogEntry,
+  LocalFoodLogItem,
+  LocalManualBurnLog,
+  LocalWaterIntakeLog,
+  ManualBurnEnergySource,
+  SyncStatus,
+  UnitVolumeSnapshot,
+} from '../../../src/db/types';
 
 function localDateString(date: Date): string {
   const y = date.getFullYear();
@@ -89,6 +98,8 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
   const [lastWaterLogId, setLastWaterLogId] = useState<string | null>(null);
   const [undoTimer, setUndoTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [undismissedBurns, setUndismissedBurns] = useState<LocalManualBurnLog[]>([]);
+  const [waterLogs, setWaterLogs] = useState<LocalWaterIntakeLog[]>([]);
+  const [burnSyncByEventId, setBurnSyncByEventId] = useState<Map<string, SyncStatus>>(new Map());
 
   const loadMeals = useCallback(async () => {
     if (!userId) return;
@@ -106,15 +117,30 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
     setUndismissedBurns(await manualBurnRepository.listWithUndismissedAdvisory(userId));
   }, [userId]);
 
+  /** Today's water rows (for the day-total `SyncStatusPill`, design doc §CORE-Sync — "the water day-total"). */
+  const loadWaterLogs = useCallback(async () => {
+    if (!userId) return;
+    setWaterLogs(await waterIntakeRepository.listForLocalDate(userId, today));
+  }, [userId, today]);
+
+  /** Today's manual burns, keyed by id, so each `MANUAL`-tagged `ExpenditureRow` can carry its own sync legibility (design doc §CORE-Sync — "manual burns"). */
+  const loadBurnSync = useCallback(async () => {
+    if (!userId) return;
+    const rows = await manualBurnRepository.listForLocalDate(userId, today);
+    setBurnSyncByEventId(new Map(rows.map((r) => [r.id, r.syncStatus])));
+  }, [userId, today]);
+
   useEffect(() => {
-    // Synchronizes today's meals + undismissed overlap-advisory list with
-    // the local SQLite store on mount and whenever the loaders change — the
-    // documented legitimate effect pattern this codebase uses throughout
-    // (see ProfileContext's own note).
+    // Synchronizes today's meals, undismissed overlap-advisory list, water
+    // logs, and manual-burn sync state with the local SQLite store on mount
+    // and whenever the loaders change — the documented legitimate effect
+    // pattern this codebase uses throughout (see ProfileContext's own note).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadMeals();
     void loadAdvisories();
-  }, [loadMeals, loadAdvisories]);
+    void loadWaterLogs();
+    void loadBurnSync();
+  }, [loadMeals, loadAdvisories, loadWaterLogs, loadBurnSync]);
 
   const handleLogWater = async (volumeMl: number) => {
     if (!userId) return;
@@ -125,6 +151,7 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
     setUndoTimer(setTimeout(() => setLastWaterLogId(null), 6000));
     void runSync('post-write');
     await refresh();
+    await loadWaterLogs();
   };
 
   const handleUndoWater = async () => {
@@ -133,6 +160,7 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
     setLastWaterLogId(null);
     void runSync('post-write');
     await refresh();
+    await loadWaterLogs();
   };
 
   if (loading && !data) {
@@ -146,6 +174,11 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
   }
 
   const hasAnyLogged = !!data && (data.mealCount > 0 || data.caloriesOutKcal > 0 || data.waterMlTotal > 0);
+  // CORE-08 "Only expenditure, no food" state (design doc §CORE-08 States) —
+  // a run/lift/burn is logged but nothing eaten yet, so the generic
+  // net-tracking caption ("Net so far today…") would misleadingly imply a
+  // target was missed. Distinct, neutral copy instead.
+  const onlyExpenditureNoFood = !!data && data.mealCount === 0 && data.caloriesInKcal === 0 && data.caloriesOutKcal > 0;
 
   return (
     <>
@@ -156,7 +189,7 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
 
         {!hasAnyLogged ? (
           <View style={styles.emptyHero}>
-            <MeridianMark variant="seed" size={56} />
+            <MeridianBalance variant="empty" intakeKcal={0} expenditureKcal={0} />
             <Text style={[theme.type.title, { color: theme.color.text.primary }]} maxFontSizeMultiplier={2}>
               The day starts at the origin.
             </Text>
@@ -168,7 +201,9 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
           <MeridianBalance variant="live" intakeKcal={data?.caloriesInKcal ?? 0} expenditureKcal={data?.caloriesOutKcal ?? 0} />
         )}
         <Text style={[theme.type.caption, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
-          Net so far today — MileLift tracks what you took in and burned, not a target.
+          {onlyExpenditureNoFood
+            ? `You've burned ${Math.round(data!.caloriesOutKcal)} and logged no food yet today.`
+            : 'Net so far today — MileLift tracks what you took in and burned, not a target.'}
         </Text>
 
         {undismissedBurns.map((burn) => (
@@ -184,6 +219,7 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
               await manualBurnRepository.dismissOverlapAdvisory(burn.id);
               void runSync('post-write');
               await loadAdvisories();
+              await loadBurnSync();
               await refresh();
             }}
           />
@@ -213,6 +249,7 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
                     eventType={e.eventType}
                     name={e.label ?? (e.eventType === 'gps_activity' ? 'Run' : e.eventType === 'strength_session' ? 'Workout' : 'Burn')}
                     kcal={e.energyKcal}
+                    syncStatus={e.eventType === 'manual_calorie_burn' ? burnSyncByEventId.get(e.timelineEventId) : undefined}
                     onPress={
                       e.eventType === 'gps_activity'
                         ? () => router.push({ pathname: '/activity/[id]', params: { id: e.timelineEventId } })
@@ -228,9 +265,14 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
         </View>
 
         <View style={styles.section}>
-          <Text style={[theme.type.heading, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.8}>
-            Water
-          </Text>
+          <View style={styles.sectionHeadRow}>
+            <Text style={[theme.type.heading, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.8}>
+              Water
+            </Text>
+            {aggregateSyncStatus(waterLogs) && aggregateSyncStatus(waterLogs) !== 'synced' && (
+              <SyncStatusPill status={aggregateSyncStatus(waterLogs)!} onRetry={() => void runSync('manual')} />
+            )}
+          </View>
           <WaterQuickAdd totalMl={data?.waterMlTotal ?? 0} unit={unitVolume} onLogMl={handleLogWater} canUndo={!!lastWaterLogId} onUndo={handleUndoWater} />
         </View>
 
@@ -295,6 +337,7 @@ function TodayTab({ userId, unitVolume }: { userId: string | null; unitVolume: U
           setShowBurnSheet(false);
           await refresh();
           await loadAdvisories();
+          await loadBurnSync();
         }}
       />
     </>
@@ -473,7 +516,17 @@ function HistoryTab({ userId }: { userId: string | null }) {
   }
 
   if (days.length === 0) {
-    return <EmptyState title="No food log history yet." body="Log a meal and it'll show up here, day by day." />;
+    return (
+      <View style={[styles.content, styles.emptyHero]}>
+        <MeridianBalance variant="empty" intakeKcal={0} expenditureKcal={0} />
+        <Text style={[theme.type.heading, { color: theme.color.text.primary }]} maxFontSizeMultiplier={2}>
+          No food log history yet.
+        </Text>
+        <Text style={[theme.type.body, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
+          Log a meal and it&apos;ll show up here, day by day.
+        </Text>
+      </View>
+    );
   }
 
   return (
@@ -513,6 +566,7 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   content: { padding: theme.screen.edge, gap: theme.space.lg, paddingBottom: theme.space.colossal },
   section: { gap: theme.space.xs },
+  sectionHeadRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   emptyHero: { alignItems: 'center', gap: theme.space.sm, paddingVertical: theme.space.xl },
   fab: {
     position: 'absolute',

@@ -4,7 +4,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { theme } from '../../theme';
 import { SourceTag } from './SourceTag';
 import { DataQualityTag } from './DataQualityTag';
-import type { FoodDataQuality, FoodSource } from '../../db/types';
+import { SyncStatusPill } from '../SyncStatusPill';
+import type { FoodDataQuality, FoodSource, SyncStatus } from '../../db/types';
 
 type Props = {
   name: string;
@@ -17,11 +18,13 @@ type Props = {
   proteinG: number | null;
   carbG: number | null;
   fatG: number | null;
+  /** Only set for the user's own `custom_foods` rows (design doc §CORE-Sync: custom-food rows carry sync legibility; catalog search results, a server mirror, never do). */
+  syncStatus?: SyncStatus;
   onPress: () => void;
 };
 
 /** FoodSearchRow — one `search_foods_v1` result (design doc §A). A scannable list row, not a card grid. */
-export function FoodSearchRow({ name, brand, source, dataQuality, defaultServingLabel, energyKcal, proteinG, carbG, fatG, onPress }: Props) {
+export function FoodSearchRow({ name, brand, source, dataQuality, defaultServingLabel, energyKcal, proteinG, carbG, fatG, syncStatus, onPress }: Props) {
   const macroLine =
     energyKcal != null
       ? `${Math.round(energyKcal)} kcal${proteinG != null ? ` · P ${Math.round(proteinG)}g` : ''}${carbG != null ? ` · C ${Math.round(carbG)}g` : ''}${fatG != null ? ` · F ${Math.round(fatG)}g` : ''}${defaultServingLabel ? ` (${defaultServingLabel})` : ''}`
@@ -51,6 +54,7 @@ export function FoodSearchRow({ name, brand, source, dataQuality, defaultServing
         <View style={styles.tagRow}>
           <SourceTag source={source} linkToCredits />
           <DataQualityTag dataQuality={dataQuality} />
+          {syncStatus && syncStatus !== 'synced' && <SyncStatusPill status={syncStatus} />}
         </View>
       </View>
     </Pressable>

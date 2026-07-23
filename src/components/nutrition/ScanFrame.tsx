@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { CameraView, type BarcodeScanningResult } from 'expo-camera';
 
@@ -12,11 +12,23 @@ type Props = {
   onSearchInstead: () => void;
 };
 
+/** How long the camera stays open with no successful read before the reassurance hint appears (design doc §CORE-07 "Scanning" state: "on a blurry/no-read after a few seconds"). */
+const STALLED_HINT_DELAY_MS = 4000;
+
 /** ScanFrame — the CORE-07 camera scan surface (design doc §A): a live camera preview with a Meridian-origin-cornered reticle, a torch toggle, and a "point at the barcode" hint. */
 export function ScanFrame({ onBarcodeScanned, resolving, onSearchInstead }: Props) {
   const [torchOn, setTorchOn] = useState(false);
   const [torchAvailable, setTorchAvailable] = useState(true);
   const [lastScannedAt, setLastScannedAt] = useState(0);
+  const [stalled, setStalled] = useState(false);
+
+  useEffect(() => {
+    // A few seconds of camera time with no successful read is treated as
+    // "stalled" — never trap the user in a silently-failing scan (design doc
+    // §CORE-07 "Scanning" state).
+    const timer = setTimeout(() => setStalled(true), STALLED_HINT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleScan = (result: BarcodeScanningResult) => {
     // Debounce repeat detections of the same frame — the camera fires
@@ -54,6 +66,11 @@ export function ScanFrame({ onBarcodeScanned, resolving, onSearchInstead }: Prop
           <Text style={[theme.type.body, styles.hint, { color: theme.color.text.primary }]} maxFontSizeMultiplier={2}>
             Point at the barcode
           </Text>
+          {stalled && !resolving && (
+            <Text style={[theme.type.caption, styles.hint, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={2}>
+              Can&apos;t read it — hold steady, or search by name.
+            </Text>
+          )}
         </View>
 
         <View style={styles.bottomRow}>

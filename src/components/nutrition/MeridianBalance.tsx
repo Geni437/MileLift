@@ -106,12 +106,22 @@ export function MeridianBalance({ variant, intakeKcal, expenditureKcal, beamHeig
 
       {variant === 'live' && (
         <View style={styles.sideLabelsRow} pointerEvents="none" accessibilityElementsHidden>
-          <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
-            OUT
-          </Text>
-          <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
-            IN
-          </Text>
+          <View style={styles.sideLabelCol}>
+            <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
+              OUT
+            </Text>
+            <Text style={[theme.type.metricSm, theme.fontVariation.metric, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.6}>
+              {Math.round(expenditureKcal)}
+            </Text>
+          </View>
+          <View style={[styles.sideLabelCol, styles.sideLabelColEnd]}>
+            <Text style={[theme.type.overline, { color: theme.color.text.secondary }]} maxFontSizeMultiplier={1.8}>
+              IN
+            </Text>
+            <Text style={[theme.type.metricSm, theme.fontVariation.metric, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.6}>
+              {Math.round(intakeKcal)}
+            </Text>
+          </View>
         </View>
       )}
     </View>
@@ -182,5 +192,12 @@ const styles = StyleSheet.create({
   sideLabelsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  sideLabelCol: {
+    gap: 2,
+    alignItems: 'flex-start',
+  },
+  sideLabelColEnd: {
+    alignItems: 'flex-end',
   },
 });

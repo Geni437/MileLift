@@ -14,11 +14,17 @@ import { ServingControl } from '../../../src/components/nutrition/ServingControl
 import { DataQualityTag } from '../../../src/components/nutrition/DataQualityTag';
 import { SourceTag } from '../../../src/components/nutrition/SourceTag';
 import { FoodLogItemRow } from '../../../src/components/nutrition/FoodLogItemRow';
+import { MeridianBalance } from '../../../src/components/nutrition/MeridianBalance';
+import { MacroBreakdown } from '../../../src/components/nutrition/MacroBreakdown';
 import { useAuth } from '../../../src/state/AuthContext';
 import { useFoodLog, type FoodPick } from '../../../src/features/nutrition/useFoodLog';
 import { searchFoods, type FoodSearchCursor, type FoodSearchItem } from '../../../src/lib/foodSearch';
 import { customFoodsRepository } from '../../../src/db/repositories/customFoodsRepository';
-import type { FoodServing, LocalCustomFood, MealType } from '../../../src/db/types';
+import { foodLogRepository } from '../../../src/db/repositories/foodLogRepository';
+import type { FoodServing, LocalCustomFood, LocalFoodLogEntry, MealType } from '../../../src/db/types';
+
+/** How long the post-save confirmation echo stays up before auto-advancing back (design doc handoff checklist: `MeridianBalance:static` + `MacroBreakdown` MUST appear at "the meal-save confirmation" — a simple, dismissible/auto-advancing surface, not a novel screen). */
+const CONFIRMATION_AUTO_DISMISS_MS = 2600;
 
 const MEAL_TYPES: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack', 'other'];
 const MEAL_TYPE_LABEL: Record<MealType, string> = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snack', other: 'Other' };
@@ -64,6 +70,7 @@ export default function FoodLogScreen() {
   const [pickedFood, setPickedFood] = useState<FoodPick | null>(null);
   const [selectedServingId, setSelectedServingId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
+  const [savedConfirmation, setSavedConfirmation] = useState<LocalFoodLogEntry | null>(null);
 
   useEffect(() => {
     if (entryId && userId) void foodLog.loadExisting(entryId);
@@ -118,7 +125,18 @@ export default function FoodLogScreen() {
   };
 
   const handleSaveMeal = async () => {
-    await foodLog.commit();
+    const committedId = await foodLog.commit();
+    // Re-reads the just-committed entry directly (rather than trusting
+    // `foodLog.entry` from this render) — `commit()`'s internal `setEntry`
+    // hasn't flushed into this closure yet, so the confirmation echo must
+    // read the same source of truth the rest of the app does.
+    const committed = await foodLogRepository.getEntry(committedId);
+    if (committed) setSavedConfirmation(committed);
+    else router.back();
+  };
+
+  const dismissConfirmation = () => {
+    setSavedConfirmation(null);
     router.back();
   };
 
@@ -177,6 +195,7 @@ export default function FoodLogScreen() {
               proteinG={item.proteinG}
               carbG={item.carbG}
               fatG={item.fatG}
+              syncStatus={item.syncStatus}
               onPress={() => openServingSheet(customFoodToPick(item))}
             />
           )}
@@ -296,7 +315,44 @@ export default function FoodLogScreen() {
           ))}
         </View>
       )}
+
+      {savedConfirmation && <MealSavedConfirmation entry={savedConfirmation} isAppend={!!entryId} onClose={dismissConfirmation} />}
     </SafeAreaView>
+  );
+}
+
+/**
+ * The post-log confirmation echo (design doc handoff checklist: `MeridianBalance:static`
+ * + `MacroBreakdown` MUST render bound to data at "the meal-save confirmation" — one of
+ * the four required call-sites the checklist names explicitly). Renders the just-logged
+ * meal's own totals (not the day's running balance — this is the meal's shape, mirroring
+ * a History day row's `static` micro), auto-dismisses back to Today after a few seconds,
+ * and is also tap/"Done"-dismissible — a simple, non-blocking surface, not a new screen
+ * pattern.
+ */
+function MealSavedConfirmation({ entry, isAppend, onClose }: { entry: LocalFoodLogEntry; isAppend: boolean; onClose: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, CONFIRMATION_AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={[styles.scrim, { backgroundColor: theme.color.bg.overlay }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Dismiss" />
+        <SafeAreaView edges={['bottom']} style={styles.sheetWrap}>
+          <View style={[styles.sheet, { backgroundColor: theme.color.bg.raised }]} accessibilityViewIsModal accessibilityRole="alert">
+            <Text style={[theme.type.title, { color: theme.color.text.primary }]} maxFontSizeMultiplier={1.6}>
+              {isAppend ? 'Food added.' : 'Meal logged.'}
+            </Text>
+            <MeridianBalance variant="static" intakeKcal={entry.totalEnergyKcal} expenditureKcal={0} />
+            <MacroBreakdown proteinG={entry.totalProteinG} carbG={entry.totalCarbG} fatG={entry.totalFatG} />
+            <PrimaryButton label="Done" onPress={onClose} />
+          </View>
+        </SafeAreaView>
+      </View>
+    </Modal>
   );
 }
 
